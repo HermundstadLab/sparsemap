@@ -1,0 +1,535 @@
+from src.utils import *
+from src.metadata import *
+# from src.equal import get_one_tile_id
+
+
+## LOAD MAZE, s,a --> s1
+def get_one_tile_id(xy, xy_pixel_all, tile_id_all):
+    idx_pixel = ((xy_pixel_all - xy) ** 2).sum(1).argmin()
+    tile_id = tile_id_all[idx_pixel]
+    return tile_id
+
+def load_maze_dicts(maze):
+    # convert cartesian to hex coordinates
+    v0, v1 = np.array([1, 0]), np.array([-1 / 2, 3**0.5 / 2])
+    x_grid, y_grid = np.meshgrid(range(maze.shape[1]), range(maze.shape[0]))
+    hex_0_grid, hex_1_grid = (
+        x_grid[None] * v0[:, None, None] + y_grid[None] * v1[:, None, None]
+    )
+
+    # pack to dictionaries
+    ij_xy_dict = {
+        (i, j): (x_grid[i, j], y_grid[i, j])
+        for i, j in product(range(maze.shape[1]), range(maze.shape[0]))
+    }
+    ij_hex_dict = {
+        (i, j): (hex_0_grid[i, j], hex_1_grid[i, j])
+        for i, j in product(range(maze.shape[1]), range(maze.shape[0]))
+    }
+
+    # get state-action transitions
+    xy_allowed = [xy for ij, xy in ij_xy_dict.items() if maze[ij] != -1]
+    xy_s_dict = {xy: i for i, xy in enumerate(xy_allowed)}
+    a_dict = {
+        (1, 0): 0,
+        (1, 1): 1,
+        (0, 1): 2,
+        (-1, 0): 3,
+        (-1, -1): 4,
+        (0, -1): 5,
+    }  # use right skewed hex grid
+    sas_dict = {}
+    for (x, y), s in xy_s_dict.items():
+        sas_ = {
+            (s, a): xy_s_dict[(x + ax, y + ay)]
+            for (ax, ay), a in a_dict.items()
+            if (x + ax, y + ay) in xy_allowed
+        }
+        sas_dict.update(sas_)
+    ssa_dict = {(s, s1): a for (s, a), s1 in sas_dict.items()}
+
+    # get s_nbr_dict
+    s_nbr_dict = {}
+    for (s0, a), s1 in sas_dict.items():
+        try:
+            s_nbr_dict[s0] += [s1]
+        except:
+            s_nbr_dict[s0] = [s1]
+
+    # pack to dictionaries
+    xy_ij_dict = {y: x for x, y in ij_xy_dict.items()}
+    s_xy_dict = {y: x for x, y in xy_s_dict.items()}
+    s_ij_dict = {s: xy_ij_dict[xy] for s, xy in s_xy_dict.items()}
+    s_z_dict = {s: maze[ij] for s, ij in s_ij_dict.items()}
+    s_hex_dict = {s: (ij_hex_dict[ij]) for s, ij in s_ij_dict.items()}
+    hex_a_dict = {tuple(ax * v0 + ay * v1): a for (ax, ay), a in a_dict.items()}
+    return (
+        hex_0_grid,
+        hex_1_grid,
+        s_z_dict,
+        s_hex_dict,
+        hex_a_dict,
+        xy_s_dict,
+        a_dict,
+        sas_dict,
+        ssa_dict,
+        s_nbr_dict,
+    )
+
+
+def get_s_nbr_dict(sas_dict):
+    s_nbr_dict = {}
+    for (s0, a), s1 in sas_dict.items():
+        try:
+            s_nbr_dict[s0] += [s1]
+        except:
+            s_nbr_dict[s0] = [s1]
+    return s_nbr_dict
+
+
+## CONVERT RAW TRAJECTORY TO TILE TRAJECTORY
+def load_one_traj_from_selected_sessions(df_equal, df_tile, session_selected, realtime_max, d_tile):
+    '''Load one trajectory from selected sessions.
+
+    Args:
+        df_equal (DataFrame): The input dataframe containing trajectory data.
+        df_tile (DataFrame): The dataframe containing tile information.
+        session_selected (list): List of selected session IDs.
+        realtime_max (float): Maximum allowed realtime value.
+        d_tile (float): Tile dimension for padding.
+
+    Returns:
+        DataFrame: Filtered dataframe containing the trajectory for the selected sessions.
+        
+    Note:
+        The ill-tracked points are filtered out.
+    '''
+    # prep
+    # Lx, Ly = df_tile.x.max() - df_tile.x.min(), df_tile.y.max() - df_tile.y.min()
+    xpad, ypad = d_tile*2, d_tile*2
+    dff_equal = df_equal[
+        df_equal.session.isin(session_selected) & 
+        (df_equal.realtime <= realtime_max) & 
+        (df_equal.xe >= df_tile.x.min() - xpad) & 
+        (df_equal.xe <= df_tile.x.max() + xpad) & 
+        (df_equal.ye >= df_tile.y.min() - ypad) & 
+        (df_equal.ye <= df_tile.y.max() + ypad)
+        ]
+   
+    # get x, y trajectory
+    xy_traj = dff_equal[['xe', 'ye']].values
+    return xy_traj, dff_equal
+
+def patch_skipped_transitions(s_traj, a_traj, df_tile_mean, xy_pixel_all, tile_id_all, ssa_dict):
+    # get skipped tile transitions
+    ss1_skip = np.stack([s_traj[:-1][a_traj==-1], s_traj[1:][a_traj==-1]], axis=1)
+
+    # get connecting tiles
+    xy_connect = np.stack([df_tile_mean.loc[ss1].mean(axis=0).values for ss1 in ss1_skip])
+    s_connect = [get_one_tile_id(xy, xy_pixel_all, tile_id_all) for xy in xy_connect]
+
+    # insert (rather than assign) np.nan in s_traj where a_traj is -1
+    s_traj_1 = np.insert(s_traj, np.where(a_traj==-1)[0]+1, s_connect)
+
+    # get a_traj from fixed s_traj
+    a_traj_1 = np.array(
+        [ssa_dict.get((s, s1), -1) for s, s1 in zip(s_traj_1[:-1], s_traj_1[1:])]
+    )
+    return s_traj_1, a_traj_1
+
+def get_tile_id_traj(xy_traj, xy_pixel_all, tile_id_all):
+    idx_pixel_traj = ((xy_pixel_all[None,:] - xy_traj[:,None]) ** 2).sum(2).argmin(1)
+    s_traj = tile_id_all[idx_pixel_traj]
+    return s_traj
+
+def gen_s_traj_rotated(theta, xy_traj, xy_center, xy_pixel_all, tile_id_all):
+    # rotate the trajectory counterclockwise
+    rotation_matrix = np.array([[np.cos(theta), -np.sin(theta)],
+                                [np.sin(theta),  np.cos(theta)]])
+    xy_traj_centered = xy_traj - xy_center
+    xy_traj_rotated = xy_traj_centered @ rotation_matrix.T + xy_center
+
+    # convert x,y to tile id
+    s_traj_rotated = get_tile_id_traj(xy_traj_rotated, xy_pixel_all, tile_id_all)
+    return s_traj_rotated, xy_traj_rotated
+
+def get_patched_s_traj(s_traj_unpatched, ssa_dict, df_tile_mean, xy_pixel_all, tile_id_all):
+    # load a range of data
+    # dff = df_equal[
+    #     df_equal.session.isin(session_selected) & (df_equal.realtime <= realtime_max)
+    # ]
+    # get s_traj as self-avoiding tile walk
+    # s_traj = dff_equal.tile_id.values
+    s_traj_r = np.array(
+        [x for x, y in zip(s_traj_unpatched[:-1], s_traj_unpatched[1:]) if x != y], dtype=int
+    )
+    
+    # get a_traj as tile transitions
+    a_traj_r = np.array(
+        [ssa_dict.get((s, s1), -1) for s, s1 in zip(s_traj_r[:-1], s_traj_r[1:])]
+    )
+    n_skipped_transition = (a_traj_r==-1).sum()
+    print(f'{n_skipped_transition}/{len(a_traj_r)} skipped transitions are found before patching')
+    if n_skipped_transition == 0:
+        return s_traj_r, a_traj_r
+    
+    # patch skipped transitions
+    s_traj_1, a_traj_1 = patch_skipped_transitions(s_traj_r, a_traj_r, df_tile_mean, xy_pixel_all, tile_id_all, ssa_dict)
+
+    n_skipped_transition = (a_traj_1==-1).sum()
+    print(f'{n_skipped_transition}/{len(a_traj_1)} skipped transitions are found after patching')
+    return s_traj_1, a_traj_1
+
+def get_rotated_dat_traj_for_one_mouse(mouse_id, theta_list, session_selected, df_tile_mean, xy_pixel_all, tile_id_all, ssa_dict, n_tiles, in_dir, df_tile, d_tile):
+    '''Get the tile walk trajectory & rotated trajectories for one mouse in selected sessions.'''
+    # param
+    tag = f"mouse_{mouse_id}"
+    realtime_max = np.inf # 3600 * 10 # full data
+    center_tile_id = 77
+    xy_center = df_tile_mean.loc[center_tile_id, ['x', 'y']].values
+
+    # load
+    df_equal = pickle.load(open(in_dir / tag / "df_equal", "rb"))
+    xy_traj, dff_equal = load_one_traj_from_selected_sessions(df_equal, df_tile, session_selected, realtime_max, d_tile)
+
+    # rotate trajectory (30s)
+    dat_traj_list = []
+    for theta in theta_list:
+        s_traj_rotated, xy_traj_rotated = gen_s_traj_rotated(theta, xy_traj, xy_center, xy_pixel_all, tile_id_all)
+        
+        # patch the rotated trajectory
+        s_traj_patched, a_traj_patched = get_patched_s_traj(s_traj_rotated, ssa_dict, df_tile_mean, xy_pixel_all, tile_id_all)
+        
+        # pad a_traj at t=0 so that it has same length as s_traj
+        a_traj_ext = np.concatenate(([-1], a_traj_patched))
+        
+        # get occupancy map & top occupied tiles from the patched trajectory
+        occ_map, s_top = get_occ_map_from_s_traj(s_traj_patched, n_tiles)
+        
+        # append
+        dat_traj = s_traj_patched, a_traj_ext, occ_map, s_top ,xy_traj_rotated
+        dat_traj_list.append(dat_traj)
+    return dat_traj_list
+
+# def get_s_traj_from_data(dff_equal, ssa_dict, df_tile_mean, xy_pixel_all, tile_id_all):
+#     # load a range of data
+#     # dff = df_equal[
+#     #     df_equal.session.isin(session_selected) & (df_equal.realtime <= realtime_max)
+#     # ]
+#     # get s_traj as self-avoiding tile walk
+#     s_traj = dff_equal.tile_id.values
+#     s_traj_r = np.array(
+#         [x for x, y in zip(s_traj[:-1], s_traj[1:]) if x != y], dtype=int
+#     )
+    
+#     # get a_traj as tile transitions
+#     a_traj_r = np.array(
+#         [ssa_dict.get((s, s1), -1) for s, s1 in zip(s_traj_r[:-1], s_traj_r[1:])]
+#     )
+#     n_skipped_transition = (a_traj_r==-1).sum()
+#     print(f'{n_skipped_transition}/{len(a_traj_r)} skipped transitions are found before patching')
+    
+#     # patch skipped transitions
+#     s_traj_1, a_traj_1 = patch_skipped_transitions(s_traj_r, a_traj_r, df_tile_mean, xy_pixel_all, tile_id_all, ssa_dict)
+
+#     n_skipped_transition = (a_traj_1==-1).sum()
+#     print(f'{n_skipped_transition}/{len(a_traj_1)} skipped transitions are found after patching')
+#     return s_traj_1, a_traj_1
+
+# def get_s_traj_from_markov_data(seed, dff_mc, xy_pixel_all, tile_id_all, ssa_dict):
+#     """use seed = 1-100"""
+#     # get s_traj
+#     xy_all = dff_mc[[f"x{seed}", f"y{seed}"]].values
+#     s_traj = [get_one_tile_id(xy, xy_pixel_all, tile_id_all) for xy in xy_all]
+
+#     # get s_traj
+#     s_traj_r = np.array(
+#         [x for x, y in zip(s_traj[:-1], s_traj[1:]) if x != y], dtype=int
+#     )
+#     a_traj_r = np.array(
+#         [ssa_dict.get((s, s1), -1) for s, s1 in zip(s_traj_r[:-1], s_traj_r[1:])]
+#     )
+#     return s_traj_r, a_traj_r
+
+
+def get_s_traj_from_random_walk(s0, n_iter, sas_dict, seed=42):
+    np.random.seed(seed)
+    s_traj = [s0]
+    a_traj = []
+    for iter in range(n_iter * 2):
+        s0 = s_traj[-1]
+        a0 = np.random.choice(range(ringsize))
+        s1 = sas_dict.get((s0, a0), -1)
+        if (s1 == -1) | (s1 == s0):
+            continue
+        s_traj.append(s1)
+        a_traj.append(a0)
+    return np.array(s_traj)[:n_iter], np.array(a_traj)[: n_iter - 1]
+
+
+# s_batch is not used in final version
+def batch_s_traj(s_traj, a_traj, s_nbr_dict, batchsize=1000):
+    # split traj into long segments without skipping tile transitions
+    t_breaks = [0]
+    for t, (x, y) in enumerate(zip(s_traj[:-1], s_traj[1:])):
+        if y not in s_nbr_dict[x]:
+            t_breaks.append(t)
+    t_breaks += [len(s_traj)]
+    tt_breaks = list(zip(t_breaks[:-1], t_breaks[1:]))
+    s_segment_list = [s_traj[x:y] for x, y in tt_breaks]
+    a_segment_list = [a_traj[x:y] for x, y in tt_breaks]
+
+    # further split segments into batches
+    s_batch_list = []
+    a_batch_list = []
+    for s_segment, a_segment in zip(s_segment_list, a_segment_list):
+        s_batch = [
+            (s_segment[x : x + batchsize].tolist() + [-1] * batchsize)[:batchsize]
+            for x in range(0, len(s_segment), batchsize)
+        ]  # pad with -1
+        s_batch_list += s_batch
+        #
+        a_batch = [
+            (a_segment[x : x + batchsize].tolist() + [-1] * batchsize)[:batchsize]
+            for x in range(0, len(a_segment), batchsize)
+        ]  # pad with -1
+        a_batch_list += a_batch
+
+    # pack
+    s_batch_arr = np.array(s_batch_list).T
+    a_batch_arr = np.array(a_batch_list).T
+    return s_batch_arr, a_batch_arr
+
+
+def get_occ_map_from_s_traj(s_traj, n_tiles):
+    occ_map = np.array([Counter(s_traj)[x] for x in range(n_tiles)])
+
+    # # get top tiles that cover 75% of occupancy
+    # s_sort = np.argsort(occ_map)[::-1]
+    # n_75 = np.where(occ_map[s_sort].cumsum() / occ_map.sum() >= 0.75)[0][0]
+    # s_75 = s_sort[:n_75]
+
+    # get top half tiles with high occupancy
+    s_sort = np.argsort(occ_map)[::-1]
+    s_top = s_sort[: n_tiles // 2]
+    return occ_map, s_top
+
+
+## ENUMERATE MAPS
+def get_eid_shid_arr(n_tiles, ringsize):
+    '''
+    s: tile_id
+    eid: edge_id
+    hid: heading
+    '''
+    eid_shid_arr = np.array(list(product(range(n_tiles), range(ringsize))))
+    roll_id_arr = np.array(
+        [[((y + x) % ringsize, x) for x in range(ringsize)] for y in range(ringsize)]
+    )
+    return eid_shid_arr, roll_id_arr
+
+
+def get_one_ring_as_maze_local_shape(s_base, s_z_dict, sas_dict, z_th=4):
+    z_ = np.array(
+        [
+            s_z_dict.get(y, np.inf)
+            for y in [sas_dict.get((s_base, x), -1) for x in range(ringsize)]
+        ]
+    )
+    dz_ = z_ - s_z_dict[s_base]
+    dz_clip_ = np.clip(dz_, -z_th, z_th)
+    return dz_clip_
+
+
+def get_shid_dz_arr(s_z_dict, sas_dict):
+    '''
+    s: tile_id
+    eid: edge_id
+    '''
+    seid_dz_arr = np.array(
+        [
+            get_one_ring_as_maze_local_shape(x, s_z_dict, sas_dict)
+            for x in list(s_z_dict)
+        ]
+    )
+    ring_roll_arr = np.stack(
+        [np.roll(seid_dz_arr, x, axis=1) for x in range(ringsize)], axis=2
+    )
+    return seid_dz_arr, ring_roll_arr
+
+
+# a_pi_dict = {
+#     0: (5, 0, 1),
+#     1: (0, 1, 2),
+#     2: (1, 2, 3),
+#     3: (2, 3, 4),
+#     4: (3, 4, 5),
+#     5: (4, 5, 0),
+# }
+# def get_sap_arr_v1(a_pi_dict):
+#     '''
+#     NOTE:
+#     - sap stands for (s,a) --> p(s1)
+#     - add one extra row of action for the null state
+#     '''
+#     sas_dict_for_pi = {(s,a):[sas_dict.get((s,pi), -1) for pi in a_pi_dict[a]] for s,a in list(sas_dict)}
+#     sas_dict_for_pi = {(s,a):[x for x in s1_ if x != -1] for (s,a),s1_ in sas_dict_for_pi.items()}
+#     #
+#     sap_dict = {}
+#     for (s,a),s1_ in sas_dict_for_pi.items():
+#         p1_ = p_null.copy()
+#         p1_[s1_] = 1.0 / len(s1_)
+#         sap_dict[(s,a)] = p1_
+#     sap_arr = np.stack([np.stack([sap_dict.get((s,a), p_null) for s in range(n_tiles)]) for a in range(len(a_dict) + 1)])
+#     return sap_arr
+
+
+def get_p_vonmises_for_enumPI(n_kappa_equal=101):
+    # load
+    x_ = np.arange(ringsize)
+
+    # sweep kappa to get std of von Mises distribution
+    kappa_list = np.linspace(0, 20, 2001)
+    std_list = []
+    for kappa in kappa_list:
+        p_ = vonmises.pdf(x_ * np.pi / 3, loc=0, kappa=kappa)
+        p_ = p_ / p_.sum()
+        std = (np.array([0, 1, 2, 3, 2, 1]) ** 2 * p_).sum() ** 0.5
+        std_list.append(std)
+
+    #  find kappas that yield equal std increments
+    std_equal = np.linspace(std_list[0], 0, n_kappa_equal)
+    kappa_equal = kappa_list[
+        np.abs(np.array(std_list)[:, None] - std_equal[None]).argmin(0)
+    ]
+
+    # get von Mises distributions for a=0
+    p0_equal = []
+    for kappa in kappa_equal:
+        p_ = vonmises.pdf(x_ * np.pi / 3, loc=0, kappa=kappa)
+        p_ = p_ / p_.sum()
+        p0_equal.append(p_)
+
+    # replace last p0 with onehot
+    p0_onehot = np.eye(ringsize)[0]
+    p0_equal[-1] = p0_onehot
+
+    # get von Mises distributions for all actions
+    pi_tensor = np.stack(
+        [np.roll(p0_equal, x, axis=1) for x in range(ringsize)], axis=1
+    )
+    return pi_tensor
+
+
+def get_sap_arr(pi, sas_dict, ringsize, n_tiles):
+    sap_arr = np.zeros([ringsize, n_tiles, n_tiles])  # a,p(s),p(s1)
+    for s in range(n_tiles):
+        s1_ring = np.array([sas_dict.get((s, b), -1) for b in range(ringsize)])
+        bool_ring = s1_ring != -1
+        a_valid = np.where(bool_ring)[0]
+        for a in a_valid:
+            pi_ring = pi[a, bool_ring]
+            pi_ring = pi_ring / pi_ring.sum()
+            s1_ring_r = s1_ring[bool_ring]
+            sap_arr[a, s, s1_ring_r] = pi_ring
+    return sap_arr
+
+
+# def get_ring_arr_masked(idx_masked, ring_arr, segm_idx_arr):
+#     ring_arr_masked = ring_arr.copy()
+#     if type(idx_masked) != type(None):
+#         segm_idx_masked = segm_idx_arr[idx_masked]
+#         ring_arr_masked[tuple(segm_idx_masked.T)] = np.nan
+#     return ring_arr_masked
+
+
+# def get_score_map(s_traj, p_traj):
+#     score_map_dict = {}
+#     for s, p in zip(s_traj, p_traj):
+#         try: score_map_dict[s] += [p[s]]
+#         except: score_map_dict[s] = [p[s]]
+#     #
+#     score_map = np.zeros(n_tiles)
+#     for s, p_list in score_map_dict.items():
+#         score_map[s] = np.mean(p_list)
+#     return score_map
+
+
+# def get_ambiguous_tiles_for_one_base_tile(ring_base, ring_arr):
+#     ring_roll = np.array([np.roll(ring_base, x) for x in range(6)])
+#     d_arr = np.nansum(
+#         np.abs(ring_arr[:, None, :] - ring_roll[None, :, :]), axis=-1
+#     ).min(-1)
+#     s_identical = tuple(np.where(d_arr == 0)[0])
+#     return s_identical
+
+
+# p_null = np.zeros(n_tiles)
+
+
+# def get_s_p_mask_arr(ring_arr_masked, ring_arr):
+#     """NOTE: add one extra row for the null state"""
+#     # s_p_mask_dict = {}
+#     s_p_mask_arr = np.zeros((len(ring_arr_masked) + 1, len(ring_arr_masked)))
+#     for s, ring_base in enumerate(ring_arr):
+#         s_ = get_ambiguous_tiles_for_one_base_tile(ring_base, ring_arr_masked)
+#         p_mask = p_null.copy()
+#         p_mask[list(s_)] = 1.0
+#         s_p_mask_arr[s] = p_mask
+#     return s_p_mask_arr
+
+
+# def get_pq_mask_for_ambiguous_edges
+
+
+# def diffuse_pq_one_step
+
+# def collapse_pq_for_one_step
+
+# def pq_prop_for_one_step
+
+def eval_one_map(ring_arr_masked, ring_arr, sap_arr, s_traj, a_traj):
+    # load
+    s_p_mask_arr = get_s_p_mask_arr(ring_arr_masked, ring_arr)
+
+    # iter
+    init_p = np.zeros(n_tiles)
+    init_p[s_traj[0]] = 1.0
+    p_traj = [init_p]
+    for s1, a in zip(s_traj[1:], a_traj):
+        # propagate normally for a valid transition
+        if a >= 0:
+            p0 = p_traj[-1]
+            p1 = (sap_arr[a] * p0[:, None]).sum(0)
+            p2 = p1 * s_p_mask_arr[s1]
+            p_traj.append(p2 / p2.sum())
+
+        # for broken transition, reset p to ground truth
+        else:
+            p2 = p_null.copy()
+            p2[s1] = 1.0
+            p_traj.append(p2)
+    return np.array(p_traj)
+
+
+def get_score_map(s_traj, p_traj):
+    score_mask = np.zeros_like(p_traj) + np.nan
+    score_mask[range(len(s_traj)), s_traj] = 1
+    score_map = np.nanmean(p_traj * score_mask, axis=0)
+    score_traj = np.nansum(p_traj * score_mask, axis=1)
+    #
+    score_map[np.isnan(score_map)] = 0
+    score_traj[np.isnan(score_traj)] = 0
+    return score_map, score_traj
+
+
+def get_job_dict_for_lossless_map_enum():
+    seed_pi_list_0 = [(0, 0, pi) for pi in range(0, 100, 10)]
+    seed_pi_list_1 = [(1, seed, pi) for seed in range(5) for pi in range(0, 100, 10)]
+    seed_pi_list_2 = [(2, seed, pi) for seed in range(5) for pi in range(0, 100, 10)]
+    type_seed_pi_list = seed_pi_list_0 + seed_pi_list_1 + seed_pi_list_2
+    job_dict = {
+        i + 1: (type_id, seed, pi)
+        for i, (type_id, seed, pi) in enumerate(type_seed_pi_list)
+    }
+    return job_dict
