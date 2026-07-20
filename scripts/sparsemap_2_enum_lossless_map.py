@@ -84,257 +84,78 @@ n_maps = 100
 # load tile trajectories
 dat_traj_dict = pickle.load(open(in_dir / "dat_traj_dict", "rb"))
 
-
 # %% [markdown]
-# ## DEV
-
-# %% [markdown]
-# ### src
-
-# %%
-def get_eid_unknown(map, n_edges):
-    '''
-    map is a list of encoded edge ids
-    '''
-    eid_unknown = np.array(sorted(set(range(n_edges)) - set(map)))
-    return eid_unknown
-
-def get_pq_mask_dict_for_ambiguous_edges(seid_dz_arr):
-    pq_mask = {dz: seid_dz_arr==dz for dz in np.unique(seid_dz_arr)}
-    return pq_mask
-
-def get_pq_mask_for_unknown_edges(map, eid_shid_arr, n_tiles, ringsize):
-    # load
-    eid_unknown = get_eid_unknown(map, n_edges)
-    
-    # iter
-    pq_mask_unknown = np.zeros((n_tiles, ringsize), dtype=bool)
-    if len(eid_unknown) > 0:
-        shid_masked = eid_shid_arr[eid_unknown]
-        pq_mask_unknown[*shid_masked.T] = True
-    return pq_mask_unknown
-
-def get_pq_mask_dict(pq_mask_unknown, pq_mask_amb_dict):
-    pq_mask_dict = {x: y+pq_mask_unknown for x,y in pq_mask_amb_dict.items()}
-    return pq_mask_dict
-
-def diffuse_pq_one_step(p0, q0, a, sap_arr, pi):
-    # q_prop
-    # q1 = q0 @ matrix_power(pi, 5)
-    q1 = q0 @ pi
-    # q1 = np.ones(ringsize) / ringsize  # uniform distribution
-
-    # p_prop
-    q0_roll = np.roll(q0, a)
-    p1 = (sap_arr * p0[None, :, None] * q0_roll[:, None, None]).sum(0).sum(0)
-    # p1 = (sap_arr[a] * p0[:, None]).sum(0)
-    p1 = p1 / p1.sum()
-    return p1, q1
-
-def collapse_pq_by_one_edge(pq0, s, h, pq_mask_dict, shid_dz_arr):
-    # load
-    dz = shid_dz_arr[s,h]
-    pq_mask = pq_mask_dict[dz]
-    pq0_roll = np.roll(pq0, h, axis=1)
-
-    # update joint distribution (heuristic to store marginals)
-    pq1_roll = pq0_roll * pq_mask
-    pq1 = np.roll(pq1_roll, -h, axis=1)
-    pq1 = pq1 / pq1.sum()
-    return pq1
-
-def collapse_pq_one_step(p0, q0, s, pq_mask_dict, ringsize, shid_dz_arr):
-    # build joint distribution
-    pq0 = p0[:,None] * q0[None,:]
-    
-    # iter thru 6 edges for tile s
-    for h in range(ringsize):
-        pq1 = collapse_pq_by_one_edge(pq0,s,h,pq_mask_dict, shid_dz_arr)
-        pq0 = pq1.copy()
-        
-    # get marginals
-    p1 = pq1.sum(1)
-    # q1 = pq1.sum(0) # this will cause the performance collapse e.g. 0.67 --> 0.16
-    q1 = pq1[s]
-    q1 = q1 / q1.sum()
-    # q1 = np.ones(ringsize) / ringsize  # uniform distribution
-    return p1, q1
-
-def pq_prop_for_n_steps(s_traj, a_traj, sap_arr, pi, pq_mask_dict, n_tiles, ringsize, shid_dz_arr):
-    # initialize
-    init_p = np.zeros(n_tiles)
-    init_p[s_traj[0]] = 1.0
-    init_q = np.zeros(ringsize)
-    init_q[0] = 1.0
-    # init_q = np.ones(ringsize) / ringsize  # uniform distribution
-
-    # iter
-    p_traj = [init_p]
-    q_traj = [init_q]
-    for t in range(1, len(s_traj)):
-        # load
-        p0, q0 = p_traj[-1], q_traj[-1]
-        s, a = s_traj[t], a_traj[t]
-        
-        # diffuse, collapse
-        p1, q1 = diffuse_pq_one_step(p0, q0, a, sap_arr, pi)
-        p2, q2 = collapse_pq_one_step(p1, q1, s, pq_mask_dict, ringsize, shid_dz_arr)
-        
-        # append
-        p_traj.append(p2)
-        q_traj.append(q2)
-        
-    p_traj = np.array(p_traj)
-    q_traj = np.array(q_traj)
-    return p_traj, q_traj
-
-def get_localization_score(p_traj, s_traj):
-    t_lower, t_upper = int(len(p_traj)*0), int(len(p_traj)*1)
-    #
-    n_edges = p_traj.shape[1]
-    s_traj_r = s_traj[t_lower:t_upper]
-    p_traj_r = p_traj[t_lower:t_upper]
-    #
-    # score_traj = p_traj_r[np.arange(t_upper-t_lower), s_traj_r]
-    score_traj = (p_traj_r.argmax(1) == s_traj_r) * 1.
-    score_map = np.zeros(n_tiles)
-    for eid in range(n_edges):
-        bool_select = s_traj_r == eid
-        if bool_select.sum() == 0:
-            continue
-        score_mean = score_traj[bool_select].mean()
-        score_map[eid] = score_mean
-    score = np.mean(score_map)# - np.std(score_map)
-    return score, score_map
-
+# ## RUN SINGLE: eval on one (traj, pi, map)
 
 # %%
 # prep: maze dictionaries
 hex_0_grid, hex_1_grid, s_z_dict, s_hex_dict, hex_a_dict, xy_s_dict, a_dict, sas_dict, ssa_dict, s_nbr_dict = load_maze_dicts(maze)
 
 # prep: map
-shid_dz_arr, ring_roll_arr = get_shid_dz_arr(s_z_dict, sas_dict)
-eid_shid_arr, roll_id_arr = get_eid_shid_arr(n_tiles, ringsize)
+sh_dz_arr = get_sh_dz_arr(s_z_dict, sas_dict)
+e_sh_arr = get_e_sh_arr(n_tiles, ringsize)
 
-# # prep: trajectories
-# dat_traj_dict = {0: [dat_traj], 1: dat_traj_mc_list, 2: dat_traj_rand_list}
-
-# prep: path integrator
+# prep: pi & tile transition tensor
 pi_all = get_p_vonmises_for_enumPI()
+T = get_T_tensor(sas_dict, ringsize, n_tiles)
+T_dict = get_T_tensor_dict(T, ringsize)
 
 # %%
-np.random.seed(42)
-map = np.random.permutation(n_edges)[:0]
-
-# prep: pq_mask
-pq_mask_amb_dict = get_pq_mask_dict_for_ambiguous_edges(shid_dz_arr)
-pq_mask_unknown = get_pq_mask_for_unknown_edges(map, eid_shid_arr, n_tiles, ringsize)
-pq_mask_dict = get_pq_mask_dict(pq_mask_unknown, pq_mask_amb_dict)
-
-# %%
-idx_pi = 80
-pi = pi_all[idx_pi]
-sap_arr = get_sap_arr(pi, sas_dict, ringsize, n_tiles)
-
-# %%
+# load traj
 s_traj, a_traj, occ_map, s_top, _ = dat_traj_dict[(1, 3, 0)]
+# s_traj = np.array([37,50,63,76,89,102,115,127,128,129,130,131])
+# a_traj = np.array([-1,1,1,1,1,1,1,1,0,0,0,0])
+
+# load pi
+idx_pi = 90
+pi = pi_all[idx_pi]
+sap_arr = get_sap_arr(pi_all[100], sas_dict, ringsize, n_tiles) # pq_prop_v1
+
+# load map
+np.random.seed(42)
+map = np.random.permutation(n_edges)[:30]
+
+# prep: pq_mask from map
+pq_mask_amb_dict = get_pq_mask_dict_for_ambiguous_edges(sh_dz_arr)
+pq_mask_unknown_dict = get_pq_mask_dict_for_unknown_edges(map, e_sh_arr, n_tiles, ringsize, n_edges)
+pq_mask_dict = get_pq_mask_dict(pq_mask_unknown_dict, pq_mask_amb_dict)
 
 # %%
-s_traj = np.array([37,50,63,76,89,102,115,127])
-a_traj = np.array([-1,1,1,1,1,1,1,1])
+# pq_prop
+pq_traj = pq_prop_for_n_steps(s_traj, a_traj, T_dict, pi, pq_mask_dict, n_tiles, ringsize, sh_dz_arr)
+
+# pq_prop_v1
+# p_traj, q_traj = pq_prop_for_n_steps_v1(s_traj, a_traj, sap_arr, pi, pq_mask_dict, n_tiles, ringsize, sh_dz_arr)
+
+# %% [markdown]
+# ## TEST SINGLE
+
+# %% [markdown]
+# ### pq_traj
 
 # %%
-p_traj, q_traj = pq_prop_for_n_steps(s_traj, a_traj, sap_arr, pi, pq_mask_dict, n_tiles, ringsize, shid_dz_arr)
-
-plt.imshow(p_traj[:100])
-p_traj[np.arange(len(p_traj)), s_traj].mean()
-
-# %%
-t_lower, t_upper = int(len(p_traj)*0), int(len(p_traj)*1)
-#
-n_tiles = p_traj.shape[1]
-s_traj_r = s_traj[t_lower:t_upper]
-p_traj_r = p_traj[t_lower:t_upper]
-#
-# score_traj = p_traj_r[np.arange(t_upper-t_lower), s_traj_r]
-score_traj = (p_traj_r.argmax(1) == s_traj_r) * 1.
-score_map = np.zeros(n_tiles)
-for eid in range(n_tiles):
-    bool_select = s_traj_r == eid
-    if bool_select.sum() == 0:
-        continue
-    score_mean = score_traj[bool_select].mean()
-    score_map[eid] = score_mean
-score = np.mean(score_map)# - np.std(score_map)
+plt.figure(figsize=(10,4), dpi=200)
+plt.subplot(1,2,1)
+plt.imshow(pq_traj.sum(-1)[:100], aspect='auto')
+plt.subplot(1,2,2)
+plt.imshow(pq_traj.sum(1)[:100], aspect='auto')
 
 # %%
-score_map[s_top].mean()
-
-# %%
-# load
-score_map, score_traj = get_score_map(s_traj, p_traj)
-
 # prep
 s_count = [Counter(s_traj)[x] for x in range(n_tiles)]
 hex_0_all, hex_1_all = np.array(list(s_hex_dict.values())).T
 hex_0_all, hex_1_all = np.array(list(s_hex_dict.values())).T
 
 # plot
-plt.figure(figsize=(5,5.5), dpi=200)
-plt.title(f'score = {score_map[s_top].mean():.6f}')
-plt.scatter(hex_0_all, hex_1_all, c=score_map, cmap='PuRd', marker='h', s=800, vmin=0, vmax=1, edgecolor='none')
-for (x,y), s in xy_s_dict.items():
-    plt.text(hex_0_grid[y,x], hex_1_grid[y,x], str(s), color='dimgray', fontsize=6, ha='center', va='center')
-
-# setting
-plt.axis('off')
-plt.axis('equal')
-plt.tight_layout()
-
-# %%
-# load
-# seed = 0
-# s_traj, a_traj, occ_map, s_top, xy_traj = dat_traj_dict[(0,seed,-1)]
-
-# prep
-s_count = [Counter(s_traj)[x] for x in range(n_tiles)]
-hex_0_all, hex_1_all = np.array(list(s_hex_dict.values())).T
-hex_0_all, hex_1_all = np.array(list(s_hex_dict.values())).T
-
-# plot
-plt.figure(figsize=(5,5.5), dpi=200)
-# plt.title(f'random walk ({seed}); top half occupied: {len(s_top)} tiles')
-# map
-t = 7
-s = s_traj[t]
-plt.scatter(hex_0_all, hex_1_all, c=p_traj[t], cmap='PuRd', marker='h', s=800, vmin=0, edgecolor='none')
-plt.scatter([hex_0_all[s]], [hex_1_all[s]], s=800, edgecolor='k', facecolor='none')
-for (x,y), s in xy_s_dict.items():
-    plt.text(hex_0_grid[y,x], hex_1_grid[y,x], str(s), color='dimgray', fontsize=6, ha='center', va='center')
-
-# setting
-plt.axis('off')
-plt.axis('equal')
-plt.tight_layout()
-
-# %%
-# load
-# seed = 0
-# s_traj, a_traj, occ_map, s_top, xy_traj = dat_traj_dict[(0,seed,-1)]
-
-# prep
-s_count = [Counter(s_traj)[x] for x in range(n_tiles)]
-hex_0_all, hex_1_all = np.array(list(s_hex_dict.values())).T
-hex_0_all, hex_1_all = np.array(list(s_hex_dict.values())).T
-
-# plot
-plt.figure(figsize=(8,4), dpi=200)
-for t in range(8):
-    plt.subplot(2,4,t+1)
+plt.figure(figsize=(8,6), dpi=200)
+i = 0
+for t in range(0,12):
+    i+=1
+    plt.subplot(3,4,i)
     # plt.title(f'random walk ({seed}); top half occupied: {len(s_top)} tiles')
     # map
     s = s_traj[t]
-    plt.scatter(hex_0_all, hex_1_all, c=p_traj[t], cmap='PuRd', marker='h', s=100, vmin=0, edgecolor='none')
+    plt.scatter(hex_0_all, hex_1_all, c=pq_traj[t].sum(-1), cmap='PuRd', marker='h', s=100, vmin=0, edgecolor='none')
     plt.scatter([hex_0_all[s]], [hex_1_all[s]], s=50, edgecolor='k', facecolor='none')
     # for (x,y), s in xy_s_dict.items():
     #     plt.text(hex_0_grid[y,x], hex_1_grid[y,x], str(s), color='dimgray', fontsize=6, ha='center', va='center')
@@ -345,16 +166,46 @@ for t in range(8):
 plt.tight_layout()
 
 # %% [markdown]
-# ## DEV above
+# ### score map
+
+# %%
+# load
+score_map, score = get_score_map(s_traj, pq_traj.sum(-1), s_top)
+
+# prep
+s_count = [Counter(s_traj)[x] for x in range(n_tiles)]
+hex_0_all, hex_1_all = np.array(list(s_hex_dict.values())).T
+hex_0_all, hex_1_all = np.array(list(s_hex_dict.values())).T
+
+# plot
+plt.figure(figsize=(10,5.5), dpi=200)
+
+plt.subplot(121)
+plt.title(f'score = {score:.6f}')
+plt.scatter(hex_0_all, hex_1_all, c=score_map, cmap='PuRd', marker='h', s=800, vmin=0, vmax=1, edgecolor='none')
+# plot s_top in circular markers
+plt.scatter(hex_0_all[s_top], hex_1_all[s_top], s=300, edgecolor='k', facecolor='none', marker='o', linewidth=1.5)
+for (x,y), s in xy_s_dict.items():
+    plt.text(hex_0_grid[y,x], hex_1_grid[y,x], str(s), color='dimgray', fontsize=6, ha='center', va='center')
+# setting
+plt.axis('off')
+plt.axis('equal')
+plt.tight_layout()
+
+plt.subplot(122)
+plt.title('score traj')
+plt.plot(pq_traj.sum(-1).max(1))
+
+plt.tight_layout()
+
+# %% [markdown]
+# ## RUN: finding multiple lossless maps
 
 # %%
 # # load job
 # type_id, seed, idx_pi = job_dict[job_id]
 # s_traj, a_traj, occ_map, s_top = dat_traj_dict[type_id][seed]
 # pi = pi_all[idx_pi]
-
-# %% [markdown]
-# ## RUN: finding multiple lossless maps
 
 # %% [markdown]
 # ### step 1) find maximum score with full map
