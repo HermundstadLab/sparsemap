@@ -125,6 +125,9 @@ for seed, dat_traj in zip(seed_list, dat_traj_list):
     dat_traj_dict.update(dat_traj_dict_1)
 
 # %%
+s_traj_rand, a_traj_rand = get_s_traj_from_random_walk(init_s, L_traj, sas_dict, seed=seed)
+
+# %%
 dat_traj_dict.keys()
 
 # %% [markdown]

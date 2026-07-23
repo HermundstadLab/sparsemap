@@ -297,7 +297,7 @@ def get_rotated_dat_traj_for_one_mouse(
 def get_s_traj_from_random_walk(s0, n_iter, sas_dict, seed=42):
     np.random.seed(seed)
     s_traj = [s0]
-    a_traj = []
+    a_traj = [-1]  # pad a_traj at t=0 so that it has same length as s_traj
     for iter in range(n_iter * 2):
         s0 = s_traj[-1]
         a0 = np.random.choice(range(ringsize))
@@ -306,7 +306,7 @@ def get_s_traj_from_random_walk(s0, n_iter, sas_dict, seed=42):
             continue
         s_traj.append(s1)
         a_traj.append(a0)
-    return np.array(s_traj)[:n_iter], np.array(a_traj)[: n_iter - 1]
+    return np.array(s_traj)[:n_iter], np.array(a_traj)[:n_iter]
 
 
 def get_occ_map_from_s_traj(s_traj, n_tiles):
@@ -500,12 +500,39 @@ def get_pq_mask_dict_for_unknown_edges(map, e_sh_arr, n_tiles, ringsize, n_edges
     return pq_mask_dict
 
 
-def get_pq_mask_dict(pq_mask_unknown_dict, pq_mask_amb_dict):
+def get_pq_mask_dict_for_one_map(
+    map, e_sh_arr, pq_mask_amb_dict, n_tiles, ringsize, n_edges
+):
+    # load
+    pq_mask_unknown_dict = get_pq_mask_dict_for_unknown_edges(
+        map, e_sh_arr, n_tiles, ringsize, n_edges
+    )
+
+    # iter
     pq_mask_dict = {
         (dz, h): pq_mask_amb + pq_mask_unknown_dict[h]
         for (dz, h), pq_mask_amb in pq_mask_amb_dict.items()
     }
     return pq_mask_dict
+
+
+def get_s_pq_mask_dict_for_one_map(
+    map, e_sh_arr, pq_mask_amb_dict, n_tiles, ringsize, n_edges, sh_dz_arr
+):
+    # get pq_mask_dict for one map
+    pq_mask_dict = get_pq_mask_dict_for_one_map(
+        map, e_sh_arr, pq_mask_amb_dict, n_tiles, ringsize, n_edges
+    )
+
+    # collect all six heading per tile
+    s_pq_mask_dict = dict()
+    for s in range(n_tiles):
+        s_pq_mask = 1
+        for h in range(ringsize):
+            dz = sh_dz_arr[s, h]
+            s_pq_mask = s_pq_mask * pq_mask_dict[(dz, h)]
+        s_pq_mask_dict[s] = s_pq_mask
+    return s_pq_mask_dict
 
 
 # V1
@@ -646,23 +673,33 @@ def diffuse_pq_one_step(pq0, a, T_dict, pi):
 #     return pq
 
 
-def collapse_pq_one_step(pq, s, pq_mask_dict, ringsize, sh_dz_arr):
+# def collapse_pq_one_step_v2(pq, s, pq_mask_dict, ringsize, sh_dz_arr):
+#     """
+#     NOTE: the single normalization in this function is equivalent to the iterative normalization in the previous version of this function, because the masks are disjoint and thus the order of multiplication does not matter.
+#     """
+#     for h in range(ringsize):
+#         # load mask
+#         dz = sh_dz_arr[s, h]
+#         pq_mask = pq_mask_dict[(dz, h)]
+#         # update joint distribution w/o normalization
+#         pq = pq * pq_mask
+#     # normalize
+#     pq = pq / pq.sum()
+#     return pq
+
+
+def collapse_pq_one_step(pq, s, s_pq_mask_dict, ringsize, sh_dz_arr):
     """
     NOTE: the single normalization in this function is equivalent to the iterative normalization in the previous version of this function, because the masks are disjoint and thus the order of multiplication does not matter.
     """
-    for h in range(ringsize):
-        # load mask
-        dz = sh_dz_arr[s, h]
-        pq_mask = pq_mask_dict[(dz, h)]
-        # update joint distribution w/o normalization
-        pq = pq * pq_mask
-    # normalize
+    pq_mask = s_pq_mask_dict[s]
+    pq = pq * pq_mask
     pq = pq / pq.sum()
     return pq
 
 
 def pq_prop_for_n_steps(
-    s_traj, a_traj, T_dict, pi, pq_mask_dict, n_tiles, ringsize, sh_dz_arr
+    s_traj, a_traj, T_dict, pi, s_pq_mask_dict, n_tiles, ringsize, sh_dz_arr
 ):
     # initialize
     init_pq = np.zeros([n_tiles, ringsize])
@@ -677,7 +714,7 @@ def pq_prop_for_n_steps(
 
         # diffuse, collapse
         pq1 = diffuse_pq_one_step(pq0, a, T_dict, pi)
-        pq2 = collapse_pq_one_step(pq1, s, pq_mask_dict, ringsize, sh_dz_arr)
+        pq2 = collapse_pq_one_step(pq1, s, s_pq_mask_dict, ringsize, sh_dz_arr)
 
         # append
         pq_traj.append(pq2)
@@ -696,6 +733,79 @@ def get_score_map(s_traj, p_traj, s_top):
     # score_traj[np.isnan(score_traj)] = 0
     score = score_map[s_top].mean()
     return score_map, score
+
+
+def eval_one_map(
+    map,
+    s_traj,
+    a_traj,
+    s_top,
+    T_dict,
+    pi,
+    e_sh_arr,
+    pq_mask_amb_dict,
+    n_tiles,
+    ringsize,
+    n_edges,
+    sh_dz_arr,
+):
+    # get pq_mask
+    s_pq_mask_dict = get_s_pq_mask_dict_for_one_map(
+        map, e_sh_arr, pq_mask_amb_dict, n_tiles, ringsize, n_edges, sh_dz_arr
+    )
+
+    # eval
+    pq_traj = pq_prop_for_n_steps(
+        s_traj, a_traj, T_dict, pi, s_pq_mask_dict, n_tiles, ringsize, sh_dz_arr
+    )
+    score_map, score = get_score_map(s_traj, pq_traj.sum(-1), s_top)
+    return score, score_map
+
+
+## MAP OPTIMIZER
+def get_optimization_schedule(n_parallel, n_edges, s_traj):
+    # prep
+    n_chunks_iter = [max(1, x // n_parallel) for x in np.arange(1, n_edges + 1)[::-1]]
+    chunksize_iter = [len(s_traj) // n_chunks for n_chunks in n_chunks_iter]
+    chunk_centroid_dict = {
+        n_chunks: [(2 * i + 1) / (2 * n_chunks) for i in range(n_chunks)]
+        for n_chunks in np.unique(n_chunks_iter)
+    }
+
+    # find next chunk_id for all iterations
+    chunk_id_iter = [0]
+    for iter in range(1, n_edges):
+        # load
+        n_chunk_0 = n_chunks_iter[iter - 1]
+        n_chunk_1 = n_chunks_iter[iter]
+        chunk_id_0 = chunk_id_iter[-1]
+        chunk_id_0_next = (chunk_id_0 + 1) % n_chunk_0
+
+        # find next chunk_id whose centroid is closest to the last chunk
+        if n_chunk_0 == n_chunk_1:
+            chunk_id_1 = chunk_id_0_next
+        else:
+            x0 = chunk_centroid_dict[n_chunk_0][chunk_id_0_next]
+            x1_cand = chunk_centroid_dict[n_chunk_1]
+            chunk_id_1 = np.argmin([np.abs(x1 - x0) for x1 in x1_cand])
+
+        # append
+        chunk_id_iter.append(chunk_id_1)
+
+    # pack
+    schedule = dict(enumerate(zip(n_chunks_iter, chunk_id_iter, chunksize_iter)))
+    return schedule
+
+
+def get_map_list_from_eid_removed(eid_removed, n_edges):
+    """eid_removed is a list of edge ids that are removed from full map to only a single edge_id left"""
+    eid_all = np.arange(n_edges)
+    eid_rm_iter = [
+        eid_removed[:n_sparse] for n_sparse in range(0, len(eid_removed) + 1)
+    ]
+    map_iter = [eid_all[~np.isin(eid_all, x)] for x in eid_rm_iter]
+    # map_iter = [eid_removed[::-1][:n_sparse] for n_sparse in range(1, n_edges + 1)]
+    return map_iter
 
 
 def get_job_dict_for_lossless_map_enum():
