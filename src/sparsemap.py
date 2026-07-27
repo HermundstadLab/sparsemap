@@ -310,7 +310,8 @@ def get_s_traj_from_random_walk(s0, n_iter, sas_dict, seed=42):
 
 
 def get_occ_map_from_s_traj(s_traj, n_tiles):
-    occ_map = np.array([Counter(s_traj)[x] for x in range(n_tiles)])
+    # occ_map = np.array([Counter(s_traj)[x] for x in range(n_tiles)])
+    occ_map = np.histogram(s_traj, bins=np.arange(n_tiles + 1))[0]
 
     # # get top tiles that cover 75% of occupancy
     # s_sort = np.argsort(occ_map)[::-1]
@@ -337,6 +338,21 @@ def get_e_sh_arr(n_tiles, ringsize):
     return eid_shid_arr
 
 
+def get_eid_wall(sas_dict, ringsize, n_tiles, e_sh_arr):
+    sh_wall = []
+    for s in range(n_tiles):
+        for a in range(ringsize):
+            s1 = sas_dict.get((s, a), -1)
+            if s1 == -1:
+                sh_wall.append((s, a))
+
+    # convert (s,h) to edge id
+    e_sh_list = [tuple(x) for x in e_sh_arr]
+    eid_wall = [e_sh_list.index(x) for x in sh_wall]
+    n_edges_wall = len(eid_wall)
+    return eid_wall, sh_wall, n_edges_wall
+
+
 def get_one_ring_as_maze_local_shape(s_base, s_z_dict, sas_dict, z_th=4):
     z_ = np.array(
         [
@@ -349,7 +365,7 @@ def get_one_ring_as_maze_local_shape(s_base, s_z_dict, sas_dict, z_th=4):
     return dz_clip_
 
 
-def get_sh_dz_arr(s_z_dict, sas_dict):
+def get_sh_dz_arr(s_z_dict, sas_dict, sh_wall, dz_wall=4):
     """
     s: tile_id
     eid: edge_id
@@ -360,9 +376,9 @@ def get_sh_dz_arr(s_z_dict, sas_dict):
             for x in list(s_z_dict)
         ]
     )
-    # ring_roll_arr = np.stack(
-    #     [np.roll(sh_dz_arr, x, axis=1) for x in range(ringsize)], axis=2
-    # )
+    # replace wall edges with dz=5
+    for s, h in sh_wall:
+        sh_dz_arr[s, h] = dz_wall
     return sh_dz_arr
 
 
@@ -622,7 +638,7 @@ def get_T_tensor(sas_dict, ringsize, n_tiles):
             s1 = sas_dict.get((s, a), -1)
             if s1 == -1:
                 T[s, a, :, a] = 1 / n_tiles
-                # T[s, a, s, a] = 1.0
+                # T[s, a, :, a] = 0
             else:
                 T[s, a, s1, a] = 1.0
     return T
@@ -649,6 +665,7 @@ def diffuse_pq_one_step(pq0, a, T_dict, pi):
     T = T_dict[a]
     pq2 = np.einsum("ij,ijkl->kl", pq1, T)
     # pq2 = (pq1[:, :, None, None] * T).sum((0, 1))
+    pq2 = pq2 / pq2.sum()
     return pq2
 
 
@@ -732,6 +749,7 @@ def get_score_map(s_traj, p_traj, s_top):
     score_map[np.isnan(score_map)] = 0
     # score_traj[np.isnan(score_traj)] = 0
     score = score_map[s_top].mean()
+    score = np.around(score, 6)
     return score_map, score
 
 
@@ -759,13 +777,92 @@ def eval_one_map(
         s_traj, a_traj, T_dict, pi, s_pq_mask_dict, n_tiles, ringsize, sh_dz_arr
     )
     score_map, score = get_score_map(s_traj, pq_traj.sum(-1), s_top)
-    return score, score_map
+    return score, score_map, pq_traj
 
 
 ## MAP OPTIMIZER
+def get_eid_from_s(s_list, e_sh_arr):
+    """Get edge IDs from a list of states."""
+    eid_list = []
+    for s in s_list:
+        eid_list += list(np.where(e_sh_arr[:, 0] == s)[0])
+    return np.array(eid_list, dtype=int)
+
+
+# def get_eid_cand_for_one_iter(eid_remain, p_map, e_sh_arr):
+#     """Get candidate edges from the remaining sorted by occupancy (least to most occupied)."""
+#     # get belief-occupied tiles
+#     s_nz = np.where(p_map > 0)[0]
+#     s_sort = np.argsort(p_map)  # least to most
+#     s_sort_nz = s_sort[np.isin(s_sort, s_nz)]
+
+#     # get occupied edges
+#     eid_sort_nz = get_eid_from_s(s_sort_nz, e_sh_arr)
+
+#     # get candidates from remaining edges with non-zero occupancy
+#     eid_remain_nz = eid_sort_nz[np.isin(eid_sort_nz, eid_remain)]
+#     return eid_remain_nz
+
+
+def get_eid_cand_for_one_iter(eid_remain, init_eid_cand, s_traj_r, e_sh_arr, n_tiles):
+    """Get candidate edges from the remaining sorted by occupancy (least to most occupied)."""
+    # get occupancy map from the chunk traj
+    occ_map, _ = get_occ_map_from_s_traj(s_traj_r, n_tiles)
+
+    # get belief-occupied tiles
+    s_nz = np.where(occ_map > 0)[0]
+    s_sort = np.argsort(occ_map)  # least to most
+    s_sort_nz = s_sort[np.isin(s_sort, s_nz)]
+
+    # get occupied edges
+    eid_sort_nz = get_eid_from_s(s_sort_nz, e_sh_arr)
+
+    # append init_eid_cand (from zeros of occ_map of full traj)
+    eid_cat = np.concatenate((init_eid_cand, eid_sort_nz))
+
+    # get candidates from remaining edges with non-zero occupancy
+    eid_cand = eid_cat[np.isin(eid_cat, eid_remain)]
+    return eid_cand
+
+
+def get_one_traj_chunk(s_traj, a_traj, chunk_id, chunksize):
+    if chunk_id is None:
+        return s_traj, a_traj
+    else:
+        s_traj_r = s_traj[chunk_id * chunksize : (chunk_id + 1) * chunksize]
+        a_traj_r = a_traj[chunk_id * chunksize : (chunk_id + 1) * chunksize]
+        return s_traj_r, a_traj_r
+
+
+# def initialize_optimization(occ_map, e_sh_arr, eid_wall, n_edges):
+#     # remove unoccupied edges first (deprecated since belief distribution can still diffuse into unoccupied tile)
+#     s_removed = np.where(occ_map == 0)[0]
+#     eid_removed = list(get_eid_from_s(s_removed, e_sh_arr))
+
+#     # assign wall edges to be added initially (for method=ADD)
+#     eid_added = eid_wall
+
+#     # get remaining edges
+#     eid_remain = np.arange(n_edges)
+#     eid_remain = eid_remain[~np.isin(eid_remain, eid_removed)]
+
+#     # remove wall edges
+#     eid_remain = eid_remain[~np.isin(eid_remain, eid_wall)]
+#     return eid_removed, eid_added, eid_remain
+
+
+def initialize_optimization(n_edges):
+    eid_removed = []
+    eid_remain = np.arange(n_edges)
+    return eid_removed, eid_remain
+
+
 def get_optimization_schedule(n_parallel, n_edges, s_traj):
     # prep
-    n_chunks_iter = [max(1, x // n_parallel) for x in np.arange(1, n_edges + 1)[::-1]]
+    n_edges_max = n_edges
+    n_chunks_iter = [
+        max(1, x // n_parallel) for x in np.arange(1, n_edges_max + 1)[::-1]
+    ]
     chunksize_iter = [len(s_traj) // n_chunks for n_chunks in n_chunks_iter]
     chunk_centroid_dict = {
         n_chunks: [(2 * i + 1) / (2 * n_chunks) for i in range(n_chunks)]
@@ -774,7 +871,7 @@ def get_optimization_schedule(n_parallel, n_edges, s_traj):
 
     # find next chunk_id for all iterations
     chunk_id_iter = [0]
-    for iter in range(1, n_edges):
+    for iter in range(1, n_edges_max):
         # load
         n_chunk_0 = n_chunks_iter[iter - 1]
         n_chunk_1 = n_chunks_iter[iter]
@@ -797,6 +894,50 @@ def get_optimization_schedule(n_parallel, n_edges, s_traj):
     return schedule
 
 
+# def get_optimization_schedule(n_parallel, n_edges, n_edges_wall, s_traj, method="DEL"):
+#     # prep
+#     n_edges_max = n_edges - n_edges_wall
+#     n_chunks_iter = [
+#         max(1, x // n_parallel) for x in np.arange(1, n_edges_max + 1)[::-1]
+#     ]
+#     chunksize_iter = [len(s_traj) // n_chunks for n_chunks in n_chunks_iter]
+#     chunk_centroid_dict = {
+#         n_chunks: [(2 * i + 1) / (2 * n_chunks) for i in range(n_chunks)]
+#         for n_chunks in np.unique(n_chunks_iter)
+#     }
+
+#     # find next chunk_id for all iterations
+#     chunk_id_iter = [0]
+#     for iter in range(1, n_edges_max):
+#         # load
+#         n_chunk_0 = n_chunks_iter[iter - 1]
+#         n_chunk_1 = n_chunks_iter[iter]
+#         chunk_id_0 = chunk_id_iter[-1]
+#         chunk_id_0_next = (chunk_id_0 + 1) % n_chunk_0
+
+#         # find next chunk_id whose centroid is closest to the last chunk
+#         if n_chunk_0 == n_chunk_1:
+#             chunk_id_1 = chunk_id_0_next
+#         else:
+#             x0 = chunk_centroid_dict[n_chunk_0][chunk_id_0_next]
+#             x1_cand = chunk_centroid_dict[n_chunk_1]
+#             chunk_id_1 = np.argmin([np.abs(x1 - x0) for x1 in x1_cand])
+
+#         # append
+#         chunk_id_iter.append(chunk_id_1)
+
+#     # pack
+#     if method == "DEL":
+#         schedule = dict(enumerate(zip(n_chunks_iter, chunk_id_iter, chunksize_iter)))
+#     elif method == "ADD":
+#         schedule = dict(
+#             enumerate(
+#                 zip(n_chunks_iter[::-1], chunk_id_iter[::-1], chunksize_iter[::-1])
+#             )
+#         )
+#     return schedule
+
+
 def get_map_list_from_eid_removed(eid_removed, n_edges):
     """eid_removed is a list of edge ids that are removed from full map to only a single edge_id left"""
     eid_all = np.arange(n_edges)
@@ -808,13 +949,13 @@ def get_map_list_from_eid_removed(eid_removed, n_edges):
     return map_iter
 
 
-def get_job_dict_for_lossless_map_enum():
-    seed_pi_list_0 = [(0, 0, pi) for pi in range(0, 100, 10)]
-    seed_pi_list_1 = [(1, seed, pi) for seed in range(5) for pi in range(0, 100, 10)]
-    seed_pi_list_2 = [(2, seed, pi) for seed in range(5) for pi in range(0, 100, 10)]
-    type_seed_pi_list = seed_pi_list_0 + seed_pi_list_1 + seed_pi_list_2
-    job_dict = {
-        i + 1: (type_id, seed, pi)
-        for i, (type_id, seed, pi) in enumerate(type_seed_pi_list)
-    }
-    return job_dict
+# def get_job_dict_for_lossless_map_enum():
+#     seed_pi_list_0 = [(0, 0, pi) for pi in range(0, 100, 10)]
+#     seed_pi_list_1 = [(1, seed, pi) for seed in range(5) for pi in range(0, 100, 10)]
+#     seed_pi_list_2 = [(2, seed, pi) for seed in range(5) for pi in range(0, 100, 10)]
+#     type_seed_pi_list = seed_pi_list_0 + seed_pi_list_1 + seed_pi_list_2
+#     job_dict = {
+#         i + 1: (type_id, seed, pi)
+#         for i, (type_id, seed, pi) in enumerate(type_seed_pi_list)
+#     }
+#     return job_dict
