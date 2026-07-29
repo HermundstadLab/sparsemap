@@ -959,3 +959,21 @@ def get_map_list_from_eid_removed(eid_removed, n_edges):
 #         for i, (type_id, seed, pi) in enumerate(type_seed_pi_list)
 #     }
 #     return job_dict
+
+
+## RANDOM MAP
+def sample_one_randmap(n_edges, seed):
+    np.random.seed(seed)
+    eid_removed = np.arange(n_edges)
+    np.random.shuffle(eid_removed)
+    return eid_removed
+
+
+## SUMMARY
+def get_confidence_interval(x, axis):
+    """c=1.96 for 95% CI"""
+    x = np.array(x)
+    mean = np.mean(x, axis=axis)
+    std = np.std(x, axis=axis)
+    ci = 1.96 * std / np.sqrt(x.shape[axis])
+    return ci, mean, std
