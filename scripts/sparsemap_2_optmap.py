@@ -340,12 +340,6 @@ plt.savefig(out_dir / 'plot' / f"map_score_{job_batch[job_id]}.png")
 # %%
 np.where(~np.array([os.path.exists(out_dir / f"dat_map_{y}") for x,y in job_batch.items()]))[0]+1
 
-# %%
-os.path.exists(out_dir / f"dat_map_{job_batch[54]}")
-
-# %%
-job_batch
-
 # %% [markdown]
 # # TEST batch
 

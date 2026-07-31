@@ -230,25 +230,6 @@ if not dat_exists:
     map_iter = get_map_list_from_eid_removed(eid_removed, n_edges)
     score_iter_full, score_map_iter_full = eval_multiple_maps(map_iter, s_traj, a_traj, s_top, pi)
 
-# %%
-# ## RUN (100m)
-# if not dat_exists:
-# # if True:
-#     # get optimization schedule
-#     schedule = get_optimization_schedule(n_parallel, n_edges, s_traj)
-#     schedule = {x:schedule[x] for x in range(60)} # TEST RUN
-    
-#     # initialization
-#     eid_removed, eid_remain = initialize_optimization(n_edges)
-
-#     # run optimization
-#     score_iter, eid_removed = run_map_optimizer(s_traj, a_traj, occ_map, s_top, pi, eid_removed, eid_remain, schedule)
-
-#     # eval all maps on full trajectory
-#     print('evaluating all maps on full trajectory...')
-#     map_iter = get_map_list_from_eid_removed(eid_removed, n_edges)
-#     score_iter_full, score_map_iter_full = eval_multiple_maps(map_iter, s_traj, a_traj, s_top, pi)
-
 # %% [markdown]
 # ## PICKLE
 

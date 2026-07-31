@@ -2,8 +2,7 @@
 import os, sys, warnings, pickle, multiprocess
 import numpy as np
 import matplotlib.pyplot as plt
-
-# import seaborn as sns
+import matplotlib.ticker as mtick
 from itertools import permutations, combinations, product, islice, groupby
 from skimage.measure import label, regionprops
 from collections import Counter

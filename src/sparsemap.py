@@ -949,18 +949,6 @@ def get_map_list_from_eid_removed(eid_removed, n_edges):
     return map_iter
 
 
-# def get_job_dict_for_lossless_map_enum():
-#     seed_pi_list_0 = [(0, 0, pi) for pi in range(0, 100, 10)]
-#     seed_pi_list_1 = [(1, seed, pi) for seed in range(5) for pi in range(0, 100, 10)]
-#     seed_pi_list_2 = [(2, seed, pi) for seed in range(5) for pi in range(0, 100, 10)]
-#     type_seed_pi_list = seed_pi_list_0 + seed_pi_list_1 + seed_pi_list_2
-#     job_dict = {
-#         i + 1: (type_id, seed, pi)
-#         for i, (type_id, seed, pi) in enumerate(type_seed_pi_list)
-#     }
-#     return job_dict
-
-
 ## RANDOM MAP
 def sample_one_randmap(n_edges, seed):
     np.random.seed(seed)

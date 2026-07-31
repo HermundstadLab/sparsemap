@@ -399,8 +399,8 @@ score_tar = .6
 
 # %%
 # prep: tradeoff curves
-# score_tensor_list = [score_tensor_unrot_rm, score_tensor_rw, score_tensor_rot, score_tensor_unrot]
-score_tensor_list = [score_tensor_rw_rm, score_tensor_rw, score_tensor_rot, score_tensor_unrot]
+score_tensor_list = [score_tensor_unrot_rm, score_tensor_rw, score_tensor_rot, score_tensor_unrot]
+# score_tensor_list = [score_tensor_rw_rm, score_tensor_rw, score_tensor_rot, score_tensor_unrot]
 label_list = ['random maps, unrotated mouse', 'optimized maps, random walk', 'optimized maps, rotated mouse', 'optimized maps, unrotated mouse']
 color_list = ['gray', 'k', 'b', 'r']
 
@@ -428,7 +428,7 @@ plt.ylabel('map size (# edges)')
 plt.legend()
 
 # zoom 0
-plt.ylim([0, 450])
+plt.ylim([0, 500])
 
 # # zoom 1
 # plt.xlim([15, 95])
@@ -437,6 +437,82 @@ plt.ylim([0, 450])
 # # zoom 2
 # plt.xlim([75, 95])
 # plt.ylim([0, 45])
+
+# %% [markdown]
+# ### normalized tradeoff curves
+
+# %%
+score_tar = .6
+
+# %%
+# prep: tradeoff curves
+score_tensor_list = [score_tensor_rw, score_tensor_rot, score_tensor_unrot]
+label_list = ['optimized maps, random walk', 'optimized maps, rotated mouse', 'optimized maps, unrotated mouse']
+color_list = ['k', 'b', 'r']
+
+# prep: heatmap
+score_arr = score_tensor_unrot.mean(1)
+
+# baseline
+mapsize_arr_rw = np.argmin(np.abs(score_tensor_rw-score_tar), axis=-1)
+mapsize_ci_rw, mapsize_mean_rw, _ = get_confidence_interval(mapsize_arr_rw, axis=1)
+
+# plot
+plt.figure(figsize=(10,4), dpi=200)
+plt.suptitle(f'target score= {score_tar}; baseline: optimized maps for random walk')
+
+plt.subplot(121)
+for i, (score_tensor, label, color) in enumerate(zip(score_tensor_list, label_list, color_list)):
+    mapsize_arr = np.argmin(np.abs(score_tensor-score_tar), axis=-1)
+    mapsize_ci, mapsize_mean, _ = get_confidence_interval(mapsize_arr, axis=1)
+    
+    # override
+    mapsize_mean -= mapsize_mean_rw
+    
+    # iter
+    plt.plot(pi_level_list, mapsize_mean, color=color, lw=1, label=label)
+    for pi, ci0, ci1 in zip(pi_level_list, mapsize_mean-mapsize_ci, mapsize_mean+mapsize_ci):
+        plt.plot([pi, pi], [ci0, ci1], color=color, lw=1)
+    plt.scatter(pi_level_list, mapsize_mean-mapsize_ci, color=color, s=50, marker='_', lw=1)
+    plt.scatter(pi_level_list, mapsize_mean+mapsize_ci, color=color, s=50, marker='_', lw=1)
+plt.axhline(0, color='gray', linestyle='--', lw=1)
+plt.xlabel('PI fidelity')
+plt.ylabel('map size - baseline (# edges)')
+plt.legend()
+plt.xlim([5, 95])
+plt.ylim([-25, 5])
+plt.grid(alpha=.2)
+
+plt.subplot(122)
+for i, (score_tensor, label, color) in enumerate(zip(score_tensor_list, label_list, color_list)):
+    mapsize_arr = np.argmin(np.abs(score_tensor-score_tar), axis=-1)
+    mapsize_ci, mapsize_mean, _ = get_confidence_interval(mapsize_arr, axis=1)
+    
+    # z-score
+    zscore = (mapsize_mean - mapsize_mean_rw) / mapsize_mean_rw
+    
+    # uncertainty propagation
+    # z_ci = np.sqrt((mapsize_ci / mapsize_mean_rw)**2 + (mapsize_mean * mapsize_ci_rw / mapsize_mean_rw**2)**2)
+    
+    z_ci = (1+zscore) * np.sqrt((mapsize_ci / mapsize_mean)**2 + (mapsize_ci_rw / mapsize_mean_rw)**2)
+    
+    # iter
+    plt.plot(pi_level_list, zscore, color=color, lw=1, label=label)
+    for pi, ci0, ci1 in zip(pi_level_list, zscore-z_ci, zscore+z_ci):
+        plt.plot([pi, pi], [ci0, ci1], color=color, lw=1)
+    plt.scatter(pi_level_list, zscore-z_ci, color=color, s=50, marker='_', lw=1)
+    plt.scatter(pi_level_list, zscore+z_ci, color=color, s=50, marker='_', lw=1)
+plt.axhline(0, color='gray', linestyle='--', lw=1)
+plt.xlabel('PI fidelity')
+plt.ylabel('zscore (% increase in map size)')
+plt.gca().yaxis.set_major_formatter(mtick.PercentFormatter(xmax=1.0))
+plt.legend()
+plt.xlim([5, 95])
+plt.ylim([-.25, .05])
+plt.grid(alpha=.2)
+
+# setting
+plt.tight_layout()
 
 # %% [markdown]
 # ### compression rate (baseline: random map, unrotated)
@@ -462,7 +538,7 @@ for score_tensor in score_tensor_list:
     cr = mapsize_mean_base / mapsize_mean
     
     # uncertainty propagation
-    cr_ci = cr * (mapsize_ci / mapsize_mean + mapsize_ci_base / mapsize_mean_base)
+    cr_ci = cr * np.sqrt((mapsize_ci / mapsize_mean)**2 + (mapsize_ci_base / mapsize_mean_base)**2)
     
     # append
     cr_list.append(cr)
@@ -508,7 +584,7 @@ for score_tensor in score_tensor_list:
     cr = mapsize_mean_base / mapsize_mean
     
     # uncertainty propagation
-    cr_ci = cr * (mapsize_ci / mapsize_mean + 0*mapsize_ci_base / mapsize_mean_base)
+    cr_ci = cr * (mapsize_ci / mapsize_mean + mapsize_ci_base / mapsize_mean_base)
     
     # append
     cr_list.append(cr)
