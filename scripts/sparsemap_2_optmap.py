@@ -283,6 +283,11 @@ def eval_multiple_maps(map_list, s_traj, a_traj, s_top, pi):
 
 
 # %%
+# print mean n_chunks
+schedule = get_optimization_schedule(n_parallel, n_edges, s_traj)
+np.mean([x[0] for x in schedule.values()])
+
+# %%
 ## RUN (100m)
 if not dat_exists:
 # if True:

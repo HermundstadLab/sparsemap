@@ -17,6 +17,7 @@ from scipy.stats import poisson
 from scipy.stats import gaussian_kde
 from scipy.interpolate import interp1d
 from scipy.stats import vonmises
+from scipy.optimize import root
 from sklearn.linear_model import LinearRegression
 from numpy.linalg import matrix_power
 
