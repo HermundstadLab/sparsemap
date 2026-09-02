@@ -41,22 +41,14 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 # ## BASH PARAMETERS
 
 # %%
-job_id = 72#int(sys.argv[1])
+out_dir = project_dir / "results"
+
+if not os.path.exists(out_dir):
+    os.makedirs(out_dir)
 
 # %%
-in_dir = project_dir / "results"
-# out_dir = project_dir / "results" / "data_map"
-#
-# if not os.path.exists(out_dir):
-#     os.makedirs(out_dir)
-
-# %%
-# load tile
-# df_tile_mean = pickle.load(open(project_dir / "data" / "df_tile_mean", "rb"))
-# xy_tile_all = df_tile_mean.values
-
 # load tile trajectories
-dat_traj_dict = pickle.load(open(in_dir / "dat_traj_dict", "rb"))
+dat_traj_dict = pickle.load(open(project_dir / "results" / "dat_traj_dict", "rb"))
 
 # %% [markdown]
 # ## SPECIFY ONE JOB BATCH
@@ -129,265 +121,317 @@ T = get_T_tensor(sas_dict, ringsize, n_tiles)
 T_dict = get_T_tensor_dict(T, ringsize)
 
 # %% [markdown]
-# ### bit per edge
+# ## RUN SINGLE
 
 # %%
-# job_selected = [x for x,((y,z,w),u,v) in job_batch_randmap.items() if y==1]
-# out_dir = project_dir / "results" / "data_randmap"
-# [pickle.load(open(out_dir / f"dat_map_{job_batch_randmap[job_id]}", "rb"))[0] for job_id in job_selected]
-
-# %%
-job_batch_optmap
-
-# %%
-job_batch_randmap
-
-# %%
-job_id = 286 # 286, 176, 181
-mapsize = 68
+load_dir = project_dir / "results" / "data_optmap"
+job_id = 93 # 105,46; 99,41; 93,36; 87,31
+mapsize = 68  # 13,14; 39,41; 68,71
 
 # load job
-job = job_batch_randmap[job_id]
-out_dir = project_dir / "results" / "data_randmap"
-score_iter_full, score_map_iter_full, eid_removed = pickle.load(open(out_dir / f"dat_map_{job}", "rb"))
+job = job_batch_optmap[job_id]
 
 # %%
+# load_dir = project_dir / "results" / "data_randmap"
+# job_id = 286 # 286, 176, 181
+# mapsize = 68
+
+# # load job
+# job = job_batch_randmap[job_id]
+
+# %%
+# load one job
+s_traj, a_traj, occ_map, s_top, xy_traj = dat_traj_dict[job[0]]
+map_iter, mapsize_iter, score_map_iter, score_iter = load_maps_from_one_job(load_dir, job, n_edges)
+
+# load one map so that score≈0.7
+map, score_map, score, n_edges_map = load_one_map(mapsize, map_iter, mapsize_iter, score_iter, score_map_iter, e_sh_arr, sh_dz_arr)
+
+# get diffusion radius
+sigma_tile = get_sigma_tile(score_map, xy_tile_all)
+
+# get tile locality, ambiguity, identifiability
+L_mat, A_mat, I_mat_local = get_locality_ambiguity_identifiability(map, sigma_tile, xy_tile_all, sh_dz_arr, e_sh_arr)
+
+# get infomap
+infomap, info_mean = get_infomap(L_mat, A_mat, I_mat_local, s_top, n_edges_map, mapsize, score_map)
+
+# print
+info_mean
+
+# %% [markdown]
+# ## TEST SINGLE
+
+# %%
+# # prep
+hex_0_all, hex_1_all = np.array(list(s_hex_dict.values())).T
+hex_0_all, hex_1_all = np.array(list(s_hex_dict.values())).T
+
+# plot
+plt.figure(figsize=(6.3,5.2), dpi=200)
+# plt.title(f'mouse {mouse_id}, sessions: {2}; top half occupied: {len(s_top)} tiles')
+
+# map
+plt.scatter(hex_0_all, hex_1_all, marker='h', c='lightgray', s=900, edgecolor='none', alpha=.15)
+
+plt.scatter(hex_0_all, hex_1_all, c=infomap, cmap='PuRd', marker='o', s=300*n_edges_map, vmin=0, vmax=1, edgecolor='none')
+# plt.colorbar()
+
+for (x,y), s in xy_s_dict.items():
+    plt.text(hex_0_grid[y,x], hex_1_grid[y,x], str(s), color='dimgray', fontsize=6, ha='center', va='center')
+
+# setting
+plt.axis('off')
+plt.axis('equal')
+plt.tight_layout()
+
+
+# %% [markdown]
+# ## RUN ALL
+
+# %%
+# load_dir = project_dir / "results" / "data_optmap"
 # job_id = 93 # 105,46; 99,41; 93,36; 87,31
 # mapsize = 68  # 13,14; 39,41; 68,71
 
 # # load job
 # job = job_batch_optmap[job_id]
-# out_dir = project_dir / "results" / "data_optmap"
-# score_iter_full, score_map_iter_full, eid_removed = pickle.load(open(out_dir / f"dat_map_{job}", "rb"))
+
+# load_dir = project_dir / "results" / "data_randmap"
+# job_id = 286 # 286, 176, 181
+# mapsize = 68
+
+# # load job
+# job = job_batch_randmap[job_id]
 
 # %%
-# load traj
-s_traj, a_traj, occ_map, s_top, xy_traj = dat_traj_dict[job[0]]
+def run_mp(para):
+    # load
+    job_id, method = para
+    if method == "optmap":
+        load_dir = project_dir / "results" / "data_optmap"
+        job = job_batch_optmap[job_id]
+    elif method == "randmap":
+        load_dir = project_dir / "results" / "data_randmap"
+        job = job_batch_randmap[job_id]
+    
+    # load one job
+    s_traj, a_traj, occ_map, s_top, xy_traj = dat_traj_dict[job[0]]
+    map_iter, mapsize_iter, score_map_iter, score_iter = load_maps_from_one_job(load_dir, job, n_edges)
+    
+    # iter
+    infomap_list = []
+    info_mean_list = []
+    for mapsize in mapsize_iter:
+        # load one map so that score≈0.7
+        map, score_map, score, n_edges_map = load_one_map(mapsize, map_iter, mapsize_iter, score_iter, score_map_iter, e_sh_arr, sh_dz_arr)
+        
+        # get diffusion radius
+        sigma_tile = get_sigma_tile(score_map, xy_tile_all)
 
-# get map
-map_iter = get_map_list_from_eid_removed(eid_removed, n_edges)
-mapsize_iter = [len(x) for x in map_iter]
-iter_select = mapsize_iter.index(mapsize)
-# map_dict = {len(x): x for x in map_iter}
-map = map_iter[iter_select]
-mask_map = np.zeros_like(sh_dz_arr, dtype=int)
-mask_map[*e_sh_arr[map].T] = 1
-n_edges_map = mask_map.sum(1)
+        # get tile locality, ambiguity, identifiability
+        L_mat, A_mat, I_mat_local = get_locality_ambiguity_identifiability(map, sigma_tile, xy_tile_all, sh_dz_arr, e_sh_arr)
 
-# get diffusion radius, tile locality
-score = score_iter_full[iter_select]
-score_map = score_map_iter_full[iter_select]
-# sigma_local = 1/(2*np.pi)**.5/.7
-# sigma_local = 1
-d_mat_tile = ((xy_tile_all[:,None] - xy_tile_all[None,:,:])**2).sum(-1)**.5
-# L_tile = np.exp(-d_mat_tile**2/(2*sigma_local**2))#[:,s_top]
-# L_tile[np.diag_indices(len(L_tile))] = 0
-# L_tile = L_tile / L_tile.sum(-1, keepdims=True)
-# L_tile = np.ones_like(L_tile) / len(L_tile)
-
-# # get local tile ambiguity
-# sh_dz_arr_map = np.zeros_like(sh_dz_arr) - 1
-# sh_dz_arr_map[*e_sh_arr[map].T] = sh_dz_arr[*e_sh_arr[map].T]
-# sh_dz_roll_map = np.stack([np.roll(sh_dz_arr_map, x, axis=1) for x in range(6)], axis=1)
-# d_mat_dz = np.abs(sh_dz_roll_map[:,None,:,:] - sh_dz_arr_map[None,:,None,:]).sum(-1).min(-1)
-# A = d_mat_dz==0
-# A_local = L_tile * A
-# A_local = A_local / A_local.sum(-1, keepdims=True)
-
-# print
-score
+        # get infomap
+        infomap, info_mean = get_infomap(L_mat, A_mat, I_mat_local, s_top, n_edges_map, mapsize, score_map)
+        
+        # append
+        infomap_list.append(infomap)
+        info_mean_list.append(info_mean)
+    return mapsize_iter, infomap_list, info_mean_list
 
 
-# %%
-def f(X, s, score):
-    return np.exp(-((xy_tile_all - xy_tile_all[s])**2).sum(1) / (2*X**2)).sum() - 1/score
-
-score_map = np.ones_like(score_map) * (1-1e-6)
-sigma_tile = np.array([root(f, 0.4, args=(s, score)).x[0] for s, score in enumerate(score_map)])
-L_tile = np.exp(-d_mat_tile**2/(2*sigma_tile[:, None]**2))
-L_tile = L_tile / L_tile.sum(-1, keepdims=True)
+# %% [markdown]
+# ### optmap, mouse unrotated
 
 # %%
-# get local tile ambiguity
-sh_dz_arr_map = np.zeros_like(sh_dz_arr) + np.nan
-sh_dz_arr_map[*e_sh_arr[map].T] = sh_dz_arr[*e_sh_arr[map].T]
-sh_dz_roll_map = np.stack([np.roll(sh_dz_arr_map, x, axis=1) for x in range(6)], axis=1)
+# run (4m30s for 170jobs)
+if False:
+    param = [(job_id, 'optmap') for job_id in list(job_batch_optmap)]
+    with multiprocess.Pool() as pool:
+        mapsize_iter_all, infomap_all, info_mean_all = zip(*pool.map(run_mp, param))
+        
+    # pack
+    mapsize_iter = mapsize_iter_all[0]
+    infomap_all = np.array(infomap_all)
+    info_mean_all = np.array(info_mean_all)
+    dat_infomap_optmap = mapsize_iter, infomap_all, info_mean_all
 
-# d_tensor = np.abs(sh_dz_roll_map[:,None,:,:] - sh_dz_arr_map[None,:,None,:])
-# d_tensor = np.abs(sh_dz_roll_map[:,None,:,:] - sh_dz_arr[None,:,None,:])
-# mask_ = sh_dz_arr_map.sum(-1)!=-600
-# mask_mat = mask_[:,None] * mask_[None,:]
-# d_mat_dz = np.nansum(np.abs(sh_dz_roll_map[:,None,:,:] - sh_dz_arr[None,:,None,:]), axis=-1).min(-1)
-d_mat_dz = np.nansum(np.abs(sh_dz_arr[:,None,None,:] - sh_dz_roll_map[None,:,:,:]), axis=-1).min(-1)
-
-# d_mat_dz = np.nansum(np.abs(sh_dz_roll_map[:,None,:,:] - sh_dz_arr_map[None,:,None,:]), axis=-1).min(-1)
-# A = (d_mat_dz * mask_mat) == 0
-A = (d_mat_dz==0)#[:,s_top]
-A_local = L_tile * A
-# A_local = A_local / A_local.sum(-1, keepdims=True)
+# %% [markdown]
+# ### randmap
 
 # %%
-n_edges_map[29]
+# run (9m for 350jobs)
+if False:
+    param = [(job_id, 'randmap') for job_id in list(job_batch_randmap)]
+    with multiprocess.Pool() as pool:
+        mapsize_iter_all, infomap_all, info_mean_all = zip(*pool.map(run_mp, param))
+
+    # pack
+    mapsize_iter = mapsize_iter_all[0]
+    infomap_all = np.array(infomap_all)
+    info_mean_all = np.array(info_mean_all)
+    dat_infomap_randmap = mapsize_iter, infomap_all, info_mean_all
+
+# %% [markdown]
+# ## PICKLE
 
 # %%
-p = L_tile[s_top,:]
-q = L_tile[s_top,:] * A[s_top,:]
+if False:
+    pickle.dump(dat_infomap_optmap, open(out_dir / 'dat_infomap_optmap', "wb"))
+    pickle.dump(dat_infomap_randmap, open(out_dir / 'dat_infomap_randmap', "wb"))
+
+else:
+    dat_infomap_optmap = pickle.load(open(out_dir / 'dat_infomap_optmap', "rb"))
+    dat_infomap_randmap = pickle.load(open(out_dir / 'dat_infomap_randmap', "rb"))
+
+# %% [markdown]
+# ## TEST
+
+# %% [markdown]
+# ### prep: targeted mapsizes
 
 # %%
-plt.imshow(q, vmax=.1)
-plt.colorbar()
+# prep: score tensor for unrotated mouse (optmap)
+job_selected = [x for x,((y,z,w),u) in job_batch_optmap.items() if w==0]
+out_dir = project_dir / "results" / "data_optmap"
+score_tensor = np.array([pickle.load(open(out_dir / f"dat_map_{job_batch_optmap[job_id]}", "rb"))[0] for job_id in job_selected]).reshape(2,10,-1)
+score_tensor_unrot = np.transpose(score_tensor, (1,0,2))[:,:,::-1]
+
+# get mapsize for score≈0.7
+score_tar = .7
+mapsize_arr = np.argmin(np.abs(score_tensor_unrot-score_tar), axis=-1)
+mapsize_list = np.around(mapsize_arr.mean(1)).astype(int)
+
+# %% [markdown]
+# ### prep: infomation density array
 
 # %%
-plt.plot(np.sort(-np.log(q.sum(1)) / (-np.log(p.max(1)))))
-plt.ylim([-.05, 1.05])
-plt.grid()
-(-np.log(q.sum(1)) / (-np.log(p.max(1)))).sum()
+# init
+label_list = ['optmap, mouse', 'optmap, rotated mouse', 'optmap, random walk', 'randmap, mouse', 'randmap, random walk']
+info_tensor_list = []
 
 # %%
-(LL_tile.sum(1)-1)*w_occ
+# load
+mapsize_iter, infomap_all, info_mean_all = dat_infomap_optmap
+info_mean_all[np.isnan(info_mean_all)] = 0
+
+# 'optmap, mouse'
+job_id_select = np.array([x for x,((y,z,w),u) in job_batch_optmap.items() if w==0])
+info_tensor = np.array(info_mean_all[job_id_select-1])[:,::-1].reshape(2,10,-1)
+info_tensor = np.transpose(info_tensor, (1,0,2))
+info_tensor_list.append(info_tensor)
+
+# 'optmap, rotated mouse'
+job_id_select = np.array([x for x,((y,z,w),u) in job_batch_optmap.items() if w>0])
+info_tensor = np.array(info_mean_all[job_id_select-1])[:,::-1].reshape(2,10,5,-1)
+info_tensor = np.transpose(info_tensor, (1,0,2,3)).reshape(10,10,-1)
+info_tensor_list.append(info_tensor)
+
+# 'optmap, random walk'
+job_id_select = np.arange(1,51)
+info_tensor = np.array(info_mean_all[job_id_select-1])[:,::-1].reshape(10,5,-1)
+info_tensor_list.append(info_tensor)
 
 # %%
-(n_edges_map>0).sum()
+# load
+mapsize_iter, infomap_all, info_mean_all = dat_infomap_randmap
+info_mean_all[np.isnan(info_mean_all)] = 0
+
+# 'randmap, mouse'
+job_id_select = np.array([x for x,((y,z,w),u,v) in job_batch_randmap.items() if y==1])
+info_tensor = np.array(info_mean_all[job_id_select-1])[:,::-1].reshape(2,10,-1)
+info_tensor = np.transpose(info_tensor, (1,0,2))
+info_tensor_list.append(info_tensor)
+
+# 'randmap, random walk'
+job_id_select = np.array([x for x,((y,z,w),u,v) in job_batch_randmap.items() if y==0])
+info_tensor = np.array(info_mean_all[job_id_select-1])[:,::-1].reshape(10,25,-1)
+info_tensor_list.append(info_tensor)
 
 # %%
-e_sh_arr[map].shape ## OK, HERE IS THE DOUBLE COUNT!!!
+# iter
+info_mean_list = []
+info_ci_list = []
+
+for info_tensor in info_tensor_list:
+    info_ci, info_mean, _ = get_confidence_interval(info_tensor, axis=1)
+    info_mean_list.append(info_mean)
+    info_ci_list.append(info_ci)
 
 # %%
-w_occ = np.ones_like(occ_map)*0.
-w_occ[s_top] = [1/len(s_nbr_dict[x]) for x in s_top]
+# plt.plot(pi_level_list, info_mean[np.arange(10), mapsize_list_7])
+# plt.plot(pi_level_list, info_mean[np.arange(10), mapsize_list_7]-info_ci[np.arange(10), mapsize_list_7], color='tab:blue', alpha=.2)
+# plt.plot(pi_level_list, info_mean[np.arange(10), mapsize_list_7]+info_ci[np.arange(10), mapsize_list_7], color='tab:blue', alpha=.2)
 
-LL_tile = (L_tile>1e-8)
-# plt.imshow((LL_tile)[:,e_sh_arr[map][:,0]])
-plt.imshow(A[:,e_sh_arr[map][:,0]])
-xx = ((1-A)*LL_tile*w_occ[:,None])[:,e_sh_arr[map][:,0]].sum(0)
-# yy = (LL_tile*w_occ[:,None])[:,e_sh_arr[map][:,0]].sum(0)
-# yy = (LL_tile)[:,e_sh_arr[map][:,0]].sum(0)
-# np.sum(xx/((yy-1)+1e-16))
-np.sum(xx)
+# %% [markdown]
+# ### heatmap
 
 # %%
-plt.plot(np.sort((xx)/(yy+1e-16)))
+plt.figure(figsize=(14, 9), dpi=200)
 
-# %%
-# # prep
-# mouse_id, rot_id = 3, 0
-# s_traj, a_traj, occ_map, s_top, xy_traj = dat_traj_dict[(1,mouse_id,rot_id)]
-# s_count = [Counter(s_traj)[x] for x in range(n_tiles)]
-hex_0_all, hex_1_all = np.array(list(s_hex_dict.values())).T
-hex_0_all, hex_1_all = np.array(list(s_hex_dict.values())).T
+# heatmap
+plt.suptitle(f'heatmap: average information density\nwhite line: selected map size s.t. score≈{score_tar} for "{label_list[0]}" (same for all heatmaps)', fontsize=14)
+for i, (label, info_mean) in enumerate(zip(label_list, info_mean_list)):
+    plt.subplot(2, 3, i+1)
+    plt.title(f'{label}')
 
-# plot
-plt.figure(figsize=(6.3,5.3), dpi=200)
-# plt.title(f'mouse {mouse_id}, sessions: {2}; top half occupied: {len(s_top)} tiles')
+    # heatmap
+    plt.imshow(info_mean.T, aspect='auto', cmap='PuRd', interpolation='nearest', origin='lower', vmin=0, vmax=.5, extent=[pi_level_list[0]-5, pi_level_list[-1]+5, 0, info_mean.shape[1]])
+    plt.colorbar()
 
-# map
-plt.scatter(hex_0_all, hex_1_all, c=L_tile[76], cmap='PuRd', marker='h', s=800, vmin=0, vmax=.45, edgecolor='none')
-plt.colorbar()
+    # curve
+    plt.plot(pi_level_list, mapsize_list, c='w', lw=1, marker='d', markersize=3)
 
-plt.scatter(hex_0_all[s_top], hex_1_all[s_top], c='none', marker='o', s=450, edgecolor='b')
+    # setting
+    plt.ylim([0, 500])
+    plt.xlabel('PI fidelity')
+    plt.ylabel('map size (# edges)')
 
-plt.scatter(hex_0_all, hex_1_all, c='none', marker='o', s=n_edges_map*300, edgecolor='r')
-for (x,y), s in xy_s_dict.items():
-    plt.text(hex_0_grid[y,x], hex_1_grid[y,x], str(s), color='dimgray', fontsize=6, ha='center', va='center')
+# summary
+plt.subplot(2, 3, 6)
+color_list = ['r','b','k','gray','gray']
+linestyle_list = ['-', '-', '-', '-', '--']
+for label, info_mean, info_ci, color, linestyle in zip(label_list, info_mean_list, info_ci_list, color_list, linestyle_list):
+    info_mean_ = info_mean[np.arange(10), mapsize_list]
+    info_ci_ = info_ci[np.arange(10), mapsize_list]
+
+    plt.plot(pi_level_list, info_mean_, color=color, linestyle=linestyle, lw=1, marker='d', markersize=3, label=label)
+    for pi, ci0, ci1 in zip(pi_level_list, info_mean_-info_ci_, info_mean_+info_ci_):
+        plt.plot([pi, pi], [ci0, ci1], color=color, lw=1)
+    plt.scatter(pi_level_list, info_mean_-info_ci_, color=color, s=50, marker='_', lw=1)
+    plt.scatter(pi_level_list, info_mean_+info_ci_, color=color, s=50, marker='_', lw=1)
+        
+    # plt.axhline(0, color='gray', linestyle='--', lw=1)
+    plt.xlabel('PI fidelity')
+    plt.ylabel('average information density')
+    plt.legend()
+    plt.grid(alpha=.2)
 
 # setting
-plt.axis('off')
-plt.axis('equal')
 plt.tight_layout()
 
-# %%
-USE ACTUAL OCCUPANCY
+# %% [markdown]
+# ### summary
 
 # %%
-nbrs = [s_nbr_dict[x] for x in e_sh_arr[map][:,0]]
-n_nbrs = np.array([len([y for y in x if y in s_top]) for x in nbrs])
-n_nbrs, np.mean(n_nbrs)
-
-# %%
-nbrs = [s_nbr_dict[x] for x in s_top]
-n_nbrs = np.array([len([y for y in x if y in e_sh_arr[map][:,0]]) for x in nbrs])
-n_nbrs, np.mean(n_nbrs), np.percentile(n_nbrs,50)
-plt.plot(np.sort(n_nbrs))
-
-# %%
-len([x for x in e_sh_arr[map][:,0] if x in s_top]), np.isin(map, eid_wall).sum(), np.isin (e_sh_arr[map][:,0], set([x for x,y in sh_wall])).sum()
-
-# %%
-s_top_map = [x for x in e_sh_arr[map][:,0] if x in s_top]
-nbrs = [s_nbr_dict[x] for x in s_top_map]
-n_nbrs = np.array([len([y for y in x if y in e_sh_arr[map][:,0]]) for x in nbrs])
-n_nbrs, np.mean(n_nbrs)
-
-# %%
-plt.imshow(A_local)
-
-# %%
-# pp = w_mat_tile[77]
-# pp = np.ones_like(w_mat_tile[77]) / len(w_mat_tile[77])
-en_tile_max = (-L_tile * np.log(L_tile + 1e-16)).sum(1)
-n_eff = np.exp(en_tile_max)
-n_eff[123]
-
-# %%
-plt.plot(L_tile[112])
-plt.plot(A_local[112])
-
-# %%
-en_tile = (-A_local * np.log(A_local + 1e-16)).sum(1)
-n_amb = np.exp(en_tile)
-n_amb[123]
-
-# %%
-plt.plot(A[15])
-plt.plot(A_local[15])
-plt.plot(L_tile[15])
-
-# %%
-specmap = 1 - en_tile / en_tile_max
-infomap = specmap/(n_edges_map+1e-6)
-
-# %%
-plt.plot(specmap)
-plt.plot(infomap)
-
-# %%
-# # prep
-# mouse_id, rot_id = 3, 0
-# s_traj, a_traj, occ_map, s_top, xy_traj = dat_traj_dict[(1,mouse_id,rot_id)]
-# s_count = [Counter(s_traj)[x] for x in range(n_tiles)]
-hex_0_all, hex_1_all = np.array(list(s_hex_dict.values())).T
-hex_0_all, hex_1_all = np.array(list(s_hex_dict.values())).T
+color_list = ['r','b','k','gray','gray']
+linestyle_list = ['-', '-', '-', '-', '--']
 
 # plot
-plt.figure(figsize=(6.3,5.3), dpi=200)
-# plt.title(f'mouse {mouse_id}, sessions: {2}; top half occupied: {len(s_top)} tiles')
+plt.figure(figsize=(5,4.5), dpi=200)
+for label, info_mean, info_ci, color, linestyle in zip(label_list, info_mean_list, info_ci_list, color_list, linestyle_list):
+    info_mean_ = info_mean[np.arange(10), mapsize_list]
+    info_ci_ = info_ci[np.arange(10), mapsize_list]
 
-# map
-plt.scatter(hex_0_all, hex_1_all, c=L_tile[76], cmap='PuRd', marker='h', s=800, vmin=0, vmax=.45, edgecolor='none')
-plt.colorbar()
-
-plt.scatter(hex_0_all[s_top], hex_1_all[s_top], c='none', marker='o', s=450, edgecolor='b')
-
-plt.scatter(hex_0_all, hex_1_all, c='none', marker='o', s=n_edges_map*300, edgecolor='r')
-for (x,y), s in xy_s_dict.items():
-    plt.text(hex_0_grid[y,x], hex_1_grid[y,x], str(s), color='dimgray', fontsize=6, ha='center', va='center')
-
-# setting
-plt.axis('off')
-plt.axis('equal')
-plt.tight_layout()
-
-# %%
-np.where(L_tile==L_tile.max())
-
-# %%
-p.max()
-
-# %%
-p = L_tile[s_top,:]
-
-# %%
-s_top
-
-# %%
-L_tile[1].max()
+    plt.plot(pi_level_list, info_mean_, color=color, linestyle=linestyle, lw=1, marker='d', markersize=3, label=label)
+    for pi, ci0, ci1 in zip(pi_level_list, info_mean_-info_ci_, info_mean_+info_ci_):
+        plt.plot([pi, pi], [ci0, ci1], color=color, lw=1)
+    plt.scatter(pi_level_list, info_mean_-info_ci_, color=color, s=50, marker='_', lw=1)
+    plt.scatter(pi_level_list, info_mean_+info_ci_, color=color, s=50, marker='_', lw=1)
+        
+    # plt.axhline(0, color='gray', linestyle='--', lw=1)
+    plt.xlabel('PI fidelity')
+    plt.ylabel('average information density')
+    plt.legend()
+    plt.grid(alpha=.2)

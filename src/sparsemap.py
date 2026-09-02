@@ -965,3 +965,85 @@ def get_confidence_interval(x, axis):
     std = np.std(x, axis=axis)
     ci = 1.96 * std / np.sqrt(x.shape[axis])
     return ci, mean, std
+
+
+## INFOMAP
+def load_maps_from_one_job(load_dir, job, n_edges):
+    # load
+    score_iter, score_map_iter, eid_removed = pickle.load(
+        open(load_dir / f"dat_map_{job}", "rb")
+    )
+
+    # get map
+    map_iter = get_map_list_from_eid_removed(eid_removed, n_edges)
+    mapsize_iter = [len(x) for x in map_iter]
+    return map_iter, mapsize_iter, score_map_iter, score_iter
+
+
+def load_one_map(
+    mapsize, map_iter, mapsize_iter, score_iter, score_map_iter, e_sh_arr, sh_dz_arr
+):
+    iter_select = mapsize_iter.index(mapsize)
+    map = map_iter[iter_select]
+    score_map = score_map_iter[iter_select]
+    score = score_iter[iter_select]
+
+    # get number of edges per tile
+    mask_map = np.zeros_like(sh_dz_arr, dtype=int)
+    mask_map[*e_sh_arr[map].T] = 1
+    n_edges_map = mask_map.sum(1)
+    return map, score_map, score, n_edges_map
+
+
+def get_sigma_tile(score_map, xy_tile_all, method="score_map"):
+    """idealized hexagonal grid is used for xy_tile_all"""
+
+    def f(X, s, score):
+        return (
+            np.exp(-((xy_tile_all - xy_tile_all[s]) ** 2).sum(1) / (2 * X**2)).sum()
+            - 1 / score
+        )
+
+    if method == "score_map":
+        sigma_tile = np.array(
+            [root(f, 0.5, args=(s, score)).x[0] for s, score in enumerate(score_map)]
+        )
+    elif method == "constant":
+        sigma_tile = np.ones_like(score_map) * (1 - 1e-6)
+    return sigma_tile
+
+
+def get_locality_ambiguity_identifiability(
+    map, sigma_tile, xy_tile_all, sh_dz_arr, e_sh_arr
+):
+    # get tile locality
+    d_mat_tile = ((xy_tile_all[:, None] - xy_tile_all[None, :, :]) ** 2).sum(-1) ** 0.5
+    L_mat = np.exp(-(d_mat_tile**2) / (2 * sigma_tile[:, None] ** 2))
+    L_mat = L_mat / L_mat.sum(-1, keepdims=True)
+
+    # get tile ambiguity
+    sh_dz_map = np.zeros_like(sh_dz_arr) + np.nan
+    sh_dz_map[*e_sh_arr[map].T] = sh_dz_arr[*e_sh_arr[map].T]
+    sh_dz_roll = np.stack([np.roll(sh_dz_arr, x, axis=1) for x in range(6)], axis=1)
+    d_mat_dz = np.nansum(
+        np.abs(sh_dz_roll[:, None, :, :] - sh_dz_map[None, :, None, :]), axis=-1
+    ).min(-1)
+    A_mat = d_mat_dz == 0
+
+    # get tile identifiability
+    I_mat = 1 - A_mat
+    I_mat_local = (I_mat * L_mat) / (I_mat * L_mat + 1e-16).sum(-1, keepdims=True)
+    return L_mat, A_mat, I_mat_local
+
+
+def get_infomap(L_mat, A_mat, I_mat_local, s_top, n_edges_map, mapsize, score_map):
+    # get infomation gain as KL-divergence
+    IG = -np.log((L_mat * A_mat).sum(1))
+    IG_max = -np.log(score_map)
+    IG_norm = IG / (IG_max + 1e-16)
+
+    # attribute information gain to encoded tiles
+    FIG_mat = IG_norm[:, None] * I_mat_local
+    infomap = FIG_mat[s_top].sum(0) / (n_edges_map + 1e-16)
+    info_mean = FIG_mat[s_top].sum() / mapsize
+    return infomap, info_mean
