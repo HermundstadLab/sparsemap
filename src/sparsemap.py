@@ -1004,12 +1004,11 @@ def get_sigma_tile(score_map, xy_tile_all, method="score_map"):
             - 1 / score
         )
 
-    if method == "score_map":
-        sigma_tile = np.array(
-            [root(f, 0.5, args=(s, score)).x[0] for s, score in enumerate(score_map)]
-        )
-    elif method == "constant":
-        sigma_tile = np.ones_like(score_map) * (1 - 1e-6)
+    if method == "nearest_neighbor_limit":
+        score_map = np.ones_like(score_map) * (1 - 1e-6)
+    sigma_tile = np.array(
+        [root(f, 0.5, args=(s, score)).x[0] for s, score in enumerate(score_map)]
+    )
     return sigma_tile
 
 
@@ -1032,18 +1031,31 @@ def get_locality_ambiguity_identifiability(
 
     # get tile identifiability
     I_mat = 1 - A_mat
-    I_mat_local = (I_mat * L_mat) / (I_mat * L_mat + 1e-16).sum(-1, keepdims=True)
+    epsilon = 10 ** (round(np.log10(L_mat[0, 1])) - 6)
+    I_mat_local = (I_mat * L_mat) / (I_mat * L_mat + epsilon).sum(-1, keepdims=True)
     return L_mat, A_mat, I_mat_local
 
 
-def get_infomap(L_mat, A_mat, I_mat_local, s_top, n_edges_map, mapsize, score_map):
+def get_infomap(
+    L_mat,
+    A_mat,
+    I_mat_local,
+    s_top,
+    n_edges_map,
+    mapsize,
+    score_map,
+    method="score_map",
+):
     # get infomation gain as KL-divergence
-    IG = -np.log((L_mat * A_mat).sum(1))
+    if method == "nearest_neighbor_limit":
+        score_map = np.ones_like(score_map) * (1 - 1e-6)
     IG_max = -np.log(score_map)
-    IG_norm = IG / (IG_max + 1e-16)
+    IG = -np.log((L_mat * A_mat).sum(1))
+    epsilon = 10 ** (round(np.log10(L_mat[0, 1])) - 6)
+    IG_norm = IG / (IG_max + epsilon)
 
     # attribute information gain to encoded tiles
     FIG_mat = IG_norm[:, None] * I_mat_local
-    infomap = FIG_mat[s_top].sum(0) / (n_edges_map + 1e-16)
+    infomap = FIG_mat[s_top].sum(0) / (n_edges_map + epsilon)
     info_mean = FIG_mat[s_top].sum() / mapsize
     return infomap, info_mean

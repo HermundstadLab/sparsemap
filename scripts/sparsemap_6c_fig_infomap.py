@@ -46,13 +46,26 @@ out_dir = project_dir / "results"
 if not os.path.exists(out_dir):
     os.makedirs(out_dir)
 
+# %% [markdown]
+# ## LOCAL PARAMETERS
+
+# %%
+method_infomap = 'nearest_neighbor_limit' # 'score_map', 'nearest_neighbor_limit'
+
+# %% [markdown]
+# ## LOAD
+
 # %%
 # load tile trajectories
 dat_traj_dict = pickle.load(open(project_dir / "results" / "dat_traj_dict", "rb"))
 
 # load infomap
-dat_infomap_optmap = pickle.load(open(out_dir / 'dat_infomap_optmap', "rb"))
-dat_infomap_randmap = pickle.load(open(out_dir / 'dat_infomap_randmap', "rb"))
+if method_infomap == 'score_map':
+    dat_infomap_optmap = pickle.load(open(out_dir / 'dat_infomap_optmap', "rb"))
+    dat_infomap_randmap = pickle.load(open(out_dir / 'dat_infomap_randmap', "rb"))
+elif method_infomap == 'nearest_neighbor_limit':
+    dat_infomap_optmap = pickle.load(open(out_dir / 'dat_infomap_optmap_nn', "rb"))
+    dat_infomap_randmap = pickle.load(open(out_dir / 'dat_infomap_randmap_nn', "rb"))
 
 # %% [markdown]
 # ## SPECIFY ONE JOB BATCH
@@ -174,6 +187,7 @@ plt.tight_layout()
 load_dir = project_dir / "results" / "data_optmap"
 job_id = 93 # 105,46; 99,41; 93,36; 87,31
 mapsize = 67  # 13,14; 39,41; 68,71
+method = 'nearest_neighbor_limit' # 'score_map', 'nearest_neighbor_limit'
 
 # load one job
 job = job_batch_optmap[job_id]
@@ -184,13 +198,15 @@ map_iter, mapsize_iter, score_map_iter, score_iter = load_maps_from_one_job(load
 map, score_map, score, n_edges_map = load_one_map(mapsize, map_iter, mapsize_iter, score_iter, score_map_iter, e_sh_arr, sh_dz_arr)
 
 # get diffusion radius
-sigma_tile = get_sigma_tile(score_map, xy_tile_all)
+# score_map = np.ones_like(score_map) * (1-1e-6)
+# sigma_tile = get_sigma_tile(score_map, xy_tile_all)
+sigma_tile = get_sigma_tile(score_map, xy_tile_all, method=method_infomap)
 
 # get tile locality, ambiguity, identifiability
 L_mat, A_mat, I_mat_local = get_locality_ambiguity_identifiability(map, sigma_tile, xy_tile_all, sh_dz_arr, e_sh_arr)
 
 # get infomap
-infomap, info_mean = get_infomap(L_mat, A_mat, I_mat_local, s_top, n_edges_map, mapsize, score_map)
+infomap, info_mean = get_infomap(L_mat, A_mat, I_mat_local, s_top, n_edges_map, mapsize, score_map, method=method_infomap)
 
 # print
 info_mean

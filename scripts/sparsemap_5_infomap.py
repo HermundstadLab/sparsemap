@@ -46,6 +46,15 @@ out_dir = project_dir / "results"
 if not os.path.exists(out_dir):
     os.makedirs(out_dir)
 
+# %% [markdown]
+# ## LOCAL PARAMETERS
+
+# %%
+method = 'nearest_neighbor_limit' # 'score_map', 'nearest_neighbor_limit'
+
+# %% [markdown]
+# ## LOAD
+
 # %%
 # load tile trajectories
 dat_traj_dict = pickle.load(open(project_dir / "results" / "dat_traj_dict", "rb"))
@@ -120,7 +129,7 @@ T_dict = get_T_tensor_dict(T, ringsize)
 # %%
 load_dir = project_dir / "results" / "data_optmap"
 job_id = 93 # 105,46; 99,41; 93,36; 87,31
-mapsize = 68  # 13,14; 39,41; 68,71
+mapsize = 67  # 13,14; 39,41; 68,71
 
 # load job
 job = job_batch_optmap[job_id]
@@ -128,7 +137,7 @@ job = job_batch_optmap[job_id]
 # %%
 # load_dir = project_dir / "results" / "data_randmap"
 # job_id = 286 # 286, 176, 181
-# mapsize = 68
+# mapsize = 67
 
 # # load job
 # job = job_batch_randmap[job_id]
@@ -142,13 +151,13 @@ map_iter, mapsize_iter, score_map_iter, score_iter = load_maps_from_one_job(load
 map, score_map, score, n_edges_map = load_one_map(mapsize, map_iter, mapsize_iter, score_iter, score_map_iter, e_sh_arr, sh_dz_arr)
 
 # get diffusion radius
-sigma_tile = get_sigma_tile(score_map, xy_tile_all)
+sigma_tile = get_sigma_tile(score_map, xy_tile_all, method=method)
 
 # get tile locality, ambiguity, identifiability
 L_mat, A_mat, I_mat_local = get_locality_ambiguity_identifiability(map, sigma_tile, xy_tile_all, sh_dz_arr, e_sh_arr)
 
 # get infomap
-infomap, info_mean = get_infomap(L_mat, A_mat, I_mat_local, s_top, n_edges_map, mapsize, score_map)
+infomap, info_mean = get_infomap(L_mat, A_mat, I_mat_local, s_top, n_edges_map, mapsize, score_map, method=method)
 
 # print
 info_mean
@@ -163,7 +172,6 @@ hex_0_all, hex_1_all = np.array(list(s_hex_dict.values())).T
 
 # plot
 plt.figure(figsize=(6.3,5.2), dpi=200)
-# plt.title(f'mouse {mouse_id}, sessions: {2}; top half occupied: {len(s_top)} tiles')
 
 # map
 plt.scatter(hex_0_all, hex_1_all, marker='h', c='lightgray', s=900, edgecolor='none', alpha=.15)
@@ -179,19 +187,6 @@ plt.axis('off')
 plt.axis('equal')
 plt.tight_layout()
 
-# %%
-mapsize_iter, infomap_list, info_mean_list = run_mp((93, 'optmap'))
-
-# %%
-info_mean_list[mapsize_iter.index(68)]
-
-# %%
-mapsize_iter, infomap_all, info_mean_all = pickle.load(open(project_dir / "results" / "dat_infomap_optmap", "rb"))
-
-# %%
-plt.plot(info_mean_all[93])
-plt.plot(info_mean_list)
-
 
 # %% [markdown]
 # ## RUN ALL
@@ -199,11 +194,11 @@ plt.plot(info_mean_list)
 # %%
 def run_mp(para):
     # load
-    job_id, method = para
-    if method == "optmap":
+    job_id, label = para
+    if label == "optmap":
         load_dir = project_dir / "results" / "data_optmap"
         job = job_batch_optmap[job_id]
-    elif method == "randmap":
+    elif label == "randmap":
         load_dir = project_dir / "results" / "data_randmap"
         job = job_batch_randmap[job_id]
     
@@ -219,13 +214,13 @@ def run_mp(para):
         map, score_map, score, n_edges_map = load_one_map(mapsize, map_iter, mapsize_iter, score_iter, score_map_iter, e_sh_arr, sh_dz_arr)
         
         # get diffusion radius
-        sigma_tile = get_sigma_tile(score_map, xy_tile_all)
+        sigma_tile = get_sigma_tile(score_map, xy_tile_all, method=method)
 
         # get tile locality, ambiguity, identifiability
         L_mat, A_mat, I_mat_local = get_locality_ambiguity_identifiability(map, sigma_tile, xy_tile_all, sh_dz_arr, e_sh_arr)
 
         # get infomap
-        infomap, info_mean = get_infomap(L_mat, A_mat, I_mat_local, s_top, n_edges_map, mapsize, score_map)
+        infomap, info_mean = get_infomap(L_mat, A_mat, I_mat_local, s_top, n_edges_map, mapsize, score_map, method=method)
         
         # append
         infomap_list.append(infomap)
@@ -234,45 +229,100 @@ def run_mp(para):
 
 
 # %% [markdown]
-# ### optmap, mouse unrotated
+# ### optmap
 
 # %%
 # run (4m30s for 170jobs)
-if False:
-    param = [(job_id, 'optmap') for job_id in list(job_batch_optmap)]
-    with multiprocess.Pool() as pool:
-        mapsize_iter_all, infomap_all, info_mean_all = zip(*pool.map(run_mp, param))
-        
-    # pack
-    mapsize_iter = mapsize_iter_all[0]
-    infomap_all = np.array(infomap_all)
-    info_mean_all = np.array(info_mean_all)
-    dat_infomap_optmap = mapsize_iter, infomap_all, info_mean_all
+if method == 'score_map':
+    if not os.path.exists(out_dir / 'dat_infomap_optmap'):
+        param = [(job_id, 'optmap') for job_id in list(job_batch_optmap)]
+        with multiprocess.Pool() as pool:
+            mapsize_iter_all, infomap_all, info_mean_all = zip(*pool.map(run_mp, param))
+            
+        # pack
+        mapsize_iter = mapsize_iter_all[0]
+        infomap_all = np.array(infomap_all)
+        info_mean_all = np.array(info_mean_all)
+        dat_infomap_optmap = mapsize_iter, infomap_all, info_mean_all
 
 # %% [markdown]
 # ### randmap
 
 # %%
 # run (9m for 350jobs)
-if False:
-    param = [(job_id, 'randmap') for job_id in list(job_batch_randmap)]
-    with multiprocess.Pool() as pool:
-        mapsize_iter_all, infomap_all, info_mean_all = zip(*pool.map(run_mp, param))
+if method == 'score_map':
+    if not os.path.exists(out_dir / 'dat_infomap_randmap'):
+        param = [(job_id, 'randmap') for job_id in list(job_batch_randmap)]
+        with multiprocess.Pool() as pool:
+            mapsize_iter_all, infomap_all, info_mean_all = zip(*pool.map(run_mp, param))
 
-    # pack
-    mapsize_iter = mapsize_iter_all[0]
-    infomap_all = np.array(infomap_all)
-    info_mean_all = np.array(info_mean_all)
-    dat_infomap_randmap = mapsize_iter, infomap_all, info_mean_all
+        # pack
+        mapsize_iter = mapsize_iter_all[0]
+        infomap_all = np.array(infomap_all)
+        info_mean_all = np.array(info_mean_all)
+        dat_infomap_randmap = mapsize_iter, infomap_all, info_mean_all
+
+# %% [markdown]
+# ### optmap, nearest neighbor limit
+
+# %%
+# run (4m30s for 170jobs)
+if method == 'nearest_neighbor_limit':
+    if not os.path.exists(out_dir / 'dat_infomap_optmap_nn'):
+        param = [(job_id, 'optmap') for job_id in list(job_batch_optmap)]
+        with multiprocess.Pool() as pool:
+            mapsize_iter_all, infomap_all, info_mean_all = zip(*pool.map(run_mp, param))
+            
+        # pack
+        mapsize_iter = mapsize_iter_all[0]
+        infomap_all = np.array(infomap_all)
+        info_mean_all = np.array(info_mean_all)
+        dat_infomap_optmap_nn = mapsize_iter, infomap_all, info_mean_all
+
+# %% [markdown]
+# ### randmap, nearest neighbor limit
+
+# %%
+# run (9m for 350jobs)
+if method == 'nearest_neighbor_limit':
+    if not os.path.exists(out_dir / 'dat_infomap_randmap_nn'):
+        param = [(job_id, 'randmap') for job_id in list(job_batch_randmap)]
+        with multiprocess.Pool() as pool:
+            mapsize_iter_all, infomap_all, info_mean_all = zip(*pool.map(run_mp, param))
+
+        # pack
+        mapsize_iter = mapsize_iter_all[0]
+        infomap_all = np.array(infomap_all)
+        info_mean_all = np.array(info_mean_all)
+        dat_infomap_randmap_nn = mapsize_iter, infomap_all, info_mean_all
 
 # %% [markdown]
 # ## PICKLE
 
 # %%
-if False:
-    pickle.dump(dat_infomap_optmap, open(out_dir / 'dat_infomap_optmap', "wb"))
-    pickle.dump(dat_infomap_randmap, open(out_dir / 'dat_infomap_randmap', "wb"))
+if method == 'score_map':
+    if not os.path.exists(out_dir / 'dat_infomap_optmap'):
+        pickle.dump(dat_infomap_optmap, open(out_dir / 'dat_infomap_optmap', "wb"))
+    else:
+        dat_infomap_optmap = pickle.load(open(out_dir / 'dat_infomap_optmap', "rb"))
 
-else:
-    dat_infomap_optmap = pickle.load(open(out_dir / 'dat_infomap_optmap', "rb"))
-    dat_infomap_randmap = pickle.load(open(out_dir / 'dat_infomap_randmap', "rb"))
+# %%
+if method == 'score_map':
+    if not os.path.exists(out_dir / 'dat_infomap_randmap'):
+        pickle.dump(dat_infomap_randmap, open(out_dir / 'dat_infomap_randmap', "wb"))
+    else:
+        dat_infomap_randmap = pickle.load(open(out_dir / 'dat_infomap_randmap', "rb"))
+
+# %%
+if method == 'nearest_neighbor_limit':
+    if not os.path.exists(out_dir / 'dat_infomap_optmap_nn'):
+        pickle.dump(dat_infomap_optmap_nn, open(out_dir / 'dat_infomap_optmap_nn', "wb"))
+    else:
+        dat_infomap_optmap_nn = pickle.load(open(out_dir / 'dat_infomap_optmap_nn', "rb"))
+
+# %%
+if method == 'nearest_neighbor_limit':
+    if not os.path.exists(out_dir / 'dat_infomap_randmap_nn'):
+        pickle.dump(dat_infomap_randmap_nn, open(out_dir / 'dat_infomap_randmap_nn', "wb"))
+    else:
+        dat_infomap_randmap_nn = pickle.load(open(out_dir / 'dat_infomap_randmap_nn', "rb"))
