@@ -58,6 +58,11 @@ dat_traj_dict = pickle.load(open(in_dir / "dat_traj_dict", "rb"))
 # ## JOB BATCHES
 
 # %%
+# override
+mouse_ids = [3]
+n_mice = len(mouse_ids)
+
+# %%
 # OPTIMAL MAP BATCH
 seed_list = np.arange(n_seeds_traj)
 rotation_id_list = np.arange(6)
@@ -170,34 +175,34 @@ score_tensor_list.append(score_tensor)
 score_tensor.shape
 
 # %%
-# plot 10s
-plt.figure(figsize=(14, 9), dpi=200)
-for k, (score_tensor, label) in enumerate(zip(score_tensor_list, label_list)):
-    plt.subplot(2, 3, k+1)
-    plt.title(f'{label}')
-    for i,x in enumerate(score_tensor):
-        # load sublabels
-        if label=='optmap, mouse':
-            sublabels = [f'PI fidelity={i*10}'] + ['']*(n_mice-1)
-        elif label=='optmap, rotated mouse':
-            sublabels = [f'PI fidelity={i*10}'] + ['']*(n_mice*5-1)
-        elif label=='optmap, random walk':
-            sublabels = [f'PI fidelity={i*10}'] + ['']*(n_seeds_traj-1)
-        elif label=='randmap, mouse':
-            sublabels = [f'PI fidelity={i*10}'] + ['']*(n_mice*n_seeds_map-1)
-        elif label=='randmap, random walk':
-            sublabels = [f'PI fidelity={i*10}'] + ['']*(n_seeds_traj*n_seeds_map-1)
+# # plot 10s
+# plt.figure(figsize=(14, 9), dpi=200)
+# for k, (score_tensor, label) in enumerate(zip(score_tensor_list, label_list)):
+#     plt.subplot(2, 3, k+1)
+#     plt.title(f'{label}')
+#     for i,x in enumerate(score_tensor):
+#         # load sublabels
+#         if label=='optmap, mouse':
+#             sublabels = [f'PI fidelity={i*10}'] + ['']*(n_mice-1)
+#         elif label=='optmap, rotated mouse':
+#             sublabels = [f'PI fidelity={i*10}'] + ['']*(n_mice*5-1)
+#         elif label=='optmap, random walk':
+#             sublabels = [f'PI fidelity={i*10}'] + ['']*(n_seeds_traj-1)
+#         elif label=='randmap, mouse':
+#             sublabels = [f'PI fidelity={i*10}'] + ['']*(n_mice*n_seeds_map-1)
+#         elif label=='randmap, random walk':
+#             sublabels = [f'PI fidelity={i*10}'] + ['']*(n_seeds_traj*n_seeds_map-1)
         
-        # plot
-        plt.plot(x.T, label=sublabels, color=colors[i])
-    for y,c in zip([.6,.7], ['dimgray', 'k']): 
-        plt.axhline(y, color=c, linestyle='--', lw=1)
-    plt.xlabel('map size (# edges)')
-    plt.ylabel('average score')
-    plt.legend()
-    plt.grid(alpha=.2)
+#         # plot
+#         plt.plot(x.T, label=sublabels, color=colors[i])
+#     for y,c in zip([.6,.7], ['dimgray', 'k']): 
+#         plt.axhline(y, color=c, linestyle='--', lw=1)
+#     plt.xlabel('map size (# edges)')
+#     plt.ylabel('average score')
+#     plt.legend()
+#     plt.grid(alpha=.2)
     
-plt.tight_layout()
+# plt.tight_layout()
 
 # %% [markdown]
 # ## FIGURE: tradeoff curves
@@ -217,7 +222,8 @@ score_arr = score_tensor_select[-1].mean(1)
 
 # plot
 plt.figure(figsize=(13,5), dpi=200)
-plt.suptitle(f'n_mice={n_mice}, target score= {score_tar}')
+# plt.suptitle(f'n_mice={n_mice}, target score= {score_tar}')
+plt.suptitle(f'target score= {score_tar}, mouse_ids={mouse_ids}')
 
 plt.subplot(121)
 plt.title(f'heatmap: average score for {label_select[-1]}')
@@ -451,3 +457,59 @@ plt.tight_layout()
 # # zoom 2
 # plt.xlim([75, 95])
 # plt.ylim([0, 45])
+
+# %% [markdown]
+# ## TEST, score map
+
+# %%
+# job = ((1,19,0), 70)
+job = ((0,4,-1), 70)
+mapsize = 74
+
+# load
+# job = ((1,mouse_id,rot_id), pi_level)
+# job = ((0,0,-1), pi_level)
+load_dir = project_dir / "results" / "data_optmap"
+score_all, score_map_all, _ = pickle.load(open(load_dir / f"dat_map_{job}", "rb"))
+
+# load one iter
+iter_select = list(range(931))[::-1].index(mapsize)
+score_map = score_map_all[iter_select]
+score = score_all[iter_select]
+
+# prep
+s_traj, a_traj, occ_map, s_top, xy_traj = dat_traj_dict[job[0]]
+s_count = [Counter(s_traj)[x] for x in range(n_tiles)]
+hex_0_all, hex_1_all = np.array(list(s_hex_dict.values())).T
+hex_0_all, hex_1_all = np.array(list(s_hex_dict.values())).T
+
+# plot
+plt.figure(figsize=(11,5.5), dpi=200)
+if job[0][0]==1:
+    plt.suptitle(f'mouse {job[0][1]}, rotation {job[0][2]}, pi={job[1]}, mapsize={mapsize}, score={score:.3f}')
+elif job[0][0]==0:
+    plt.suptitle(f'randwalk {job[0][1]}, mapsize={mapsize}, score={score:.3f}')
+
+# map
+plt.subplot(121)
+plt.title('occ map, circle: frequently visited')
+plt.scatter(hex_0_all, hex_1_all, c=occ_map, cmap='PuRd', marker='h', s=800, vmin=0, edgecolor='none')
+plt.scatter(hex_0_all[s_top], hex_1_all[s_top], c='none', marker='o', s=300, edgecolor='k')
+for (x,y), s in xy_s_dict.items():
+    plt.text(hex_0_grid[y,x], hex_1_grid[y,x], str(s), color='dimgray', fontsize=6, ha='center', va='center')
+plt.axis('off')
+plt.axis('equal')
+
+plt.subplot(122)
+plt.title('score map')
+plt.scatter(hex_0_all, hex_1_all, c=score_map, cmap='YlGnBu_r', marker='h', s=800, vmin=0, vmax=1, edgecolor='none')
+plt.colorbar()
+plt.scatter(hex_0_all[s_top], hex_1_all[s_top], c='none', marker='o', s=300, edgecolor='k')
+for (x,y), s in xy_s_dict.items():
+    plt.text(hex_0_grid[y,x], hex_1_grid[y,x], str(s), color='dimgray', fontsize=6, ha='center', va='center')
+plt.axis('off')
+plt.axis('equal')
+
+# setting
+plt.axis('off')
+plt.tight_layout()

@@ -41,11 +41,11 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 # ## BASH PARAMETERS
 
 # %%
-job_id = 9#261#int(sys.argv[1])
+job_id = 420#261#int(sys.argv[1])
 
 # %%
 in_dir = project_dir / "results"
-out_dir = project_dir / "results" / "data_randmap"
+out_dir = project_dir / "results" / "data_optmap"
 #
 if not os.path.exists(out_dir):
     os.makedirs(out_dir)
@@ -69,36 +69,23 @@ dat_traj_dict = pickle.load(open(in_dir / "dat_traj_dict", "rb"))
 # 5. load a job as a nested tuple `((type_id, id_1, id_2), pi_level, map_seed)`
 
 # %%
-# PILOT BATCH: 10 pi_level, 2 mice x 5 random maps + 5 random trajectories x 5 random maps (350 jobs)
-traj_seed_list = np.arange(n_seeds_traj)
-map_seed_list = np.arange(n_seeds_map)
-pi_level_list = np.arange(0, 91, 10)
-
-# get job lists
-job_list_rand = [((0,traj_seed,-1), pi_lev, map_seed) for pi_lev in pi_level_list for traj_seed in traj_seed_list for map_seed in map_seed_list]
-job_list_mouse_3 = [((1,3,0), pi_lev, map_seed) for pi_lev in pi_level_list for map_seed in map_seed_list]
-job_list_mouse_4 = [((1,4,0), pi_lev, map_seed) for pi_lev in pi_level_list for map_seed in map_seed_list]
-
-# pack
-job_batch_pilot = {i+1: job for i, job in enumerate(job_list_rand + job_list_mouse_3 + job_list_mouse_4)}
-len(job_batch_pilot)
-
-# %%
 # FULL BATCH
-traj_seed_list = np.arange(n_seeds_traj)
-map_seed_list = np.arange(n_seeds_map)
+seed_list = np.arange(n_seeds_traj)
+rotation_id_list = np.arange(6)
 pi_level_list = np.arange(0, 91, 10)
 
 # get job lists
-job_list_rand = [((0,traj_seed,-1), pi_lev, map_seed) for pi_lev in pi_level_list for traj_seed in traj_seed_list for map_seed in map_seed_list]
-#
+job_list_rand = [((0,seed,-1), pi_lev) for pi_lev in pi_level_list for seed in seed_list]
+
 job_list_all_mice = []
 for mouse_id in mouse_ids:
-    job_list_mouse = [((1,mouse_id,0), pi_lev, map_seed) for pi_lev in pi_level_list for map_seed in map_seed_list]
+    job_list_mouse = [((1,mouse_id,rot_id), pi_lev) for pi_lev in pi_level_list for rot_id in rotation_id_list]
     job_list_all_mice.extend(job_list_mouse)
 
 # pack
 job_batch_full = {i+1: job for i, job in enumerate(job_list_rand + job_list_all_mice)}
+
+# print
 len(job_batch_full)
 
 # %% [markdown]
@@ -106,9 +93,6 @@ len(job_batch_full)
 
 # %%
 job_batch = job_batch_full
-
-# %%
-job_batch[1001]
 
 # %% [markdown]
 # ## PREP
@@ -136,11 +120,27 @@ T_dict = get_T_tensor_dict(T, ringsize)
 # check if the saved file exists
 dat_path = out_dir / f"dat_map_{job_batch[job_id]}"
 dat_exists = os.path.exists(dat_path)
+dat_exists
 
 # %%
-key, pi_level, map_seed = job_batch[job_id]
+key, pi_level = job_batch[job_id]
 s_traj, a_traj, occ_map, s_top, xy_traj = dat_traj_dict[key]
 pi = pi_all[pi_level]
+
+# %%
+# # override (single)
+# dat_exists = False
+# job = ((1, 19, 5), 70)
+# dat_path = out_dir / f"dat_map_{job}"
+
+# key, pi_level = job
+# s_traj, a_traj, occ_map, s_top, xy_traj = dat_traj_dict[key]
+# pi = pi_all[pi_level]
+
+# %%
+# # override
+# if key[0] == 1:
+#     dat_exists = False
 
 
 # %% [markdown]
@@ -238,14 +238,77 @@ def eval_multiple_maps(map_list, s_traj, a_traj, s_top, pi):
 # %%
 ## RUN (4m)
 if not dat_exists:
-    # get random map
+    # get optimized map
     print(f'eval on job={job_batch[job_id]}')
-    eid_removed = sample_one_randmap(n_edges, map_seed)
+    # print(f'eval on job={job}') # override
+    # eid_removed = sample_one_randmap(n_edges, map_seed)
+    score_iter_full_0, score_map_iter_full_0, eid_removed = pickle.load(open(dat_path, "rb"))
     
     # eval all maps on full trajectory
     print(f'evaluating all maps on full trajectory...')
     map_iter = get_map_list_from_eid_removed(eid_removed, n_edges)
     score_iter_full, score_map_iter_full = eval_multiple_maps(map_iter, s_traj, a_traj, s_top, pi)
+
+# %% [markdown]
+# ### DEV
+
+# %%
+# mapsize = 74
+
+# # load one iter
+# iter_select = list(range(931))[::-1].index(mapsize)
+# score_map = score_map_iter_full[iter_select]
+# score = score_iter_full[iter_select]
+
+# %%
+# score_iter_full[iter_select]
+
+# %%
+# mapsize_iter = [len(x) for x in map_iter]
+
+# plt.figure(figsize=(6,4), dpi=200)
+# plt.title(f'job={job}')
+# plt.plot(mapsize_iter, score_iter_full_0, label='before removing jagged')
+# plt.plot(mapsize_iter, score_iter_full, label='after (same map, optimized on jagged)')
+# plt.xlabel('mapsize')
+# plt.ylabel('score')
+# plt.xlim(-5, 200)
+# plt.grid()
+# plt.legend()
+
+# %%
+# hex_0_all, hex_1_all = np.array(list(s_hex_dict.values())).T
+# hex_0_all, hex_1_all = np.array(list(s_hex_dict.values())).T
+
+# # plot
+# plt.figure(figsize=(11,5.5), dpi=200)
+# if job[0][0]==1:
+#     plt.suptitle(f'mouse {job[0][1]}, rotation {job[0][2]}, pi={job[1]}, mapsize={mapsize}, score={score:.3f}')
+# elif job[0][0]==0:
+#     plt.suptitle(f'randwalk {job[0][1]}, mapsize={mapsize}, score={score:.3f}')
+
+# plt.subplot(121)
+# plt.title('occ map, circle: frequently visited')
+# plt.scatter(hex_0_all, hex_1_all, c=occ_map, cmap='PuRd', marker='h', s=800, vmin=0, edgecolor='none')
+# plt.scatter(hex_0_all[s_top], hex_1_all[s_top], c='none', marker='o', s=300, edgecolor='k')
+# for (x,y), s in xy_s_dict.items():
+#     plt.text(hex_0_grid[y,x], hex_1_grid[y,x], str(s), color='dimgray', fontsize=6, ha='center', va='center')
+# plt.axis('off')
+# plt.axis('equal')
+
+# plt.subplot(122)
+# plt.title('score map')
+# plt.scatter(hex_0_all, hex_1_all, c=score_map, cmap='YlGnBu_r', marker='h', s=800, vmin=0, vmax=1, edgecolor='none')
+# plt.colorbar()
+# plt.scatter(hex_0_all[s_top], hex_1_all[s_top], c='none', marker='o', s=300, edgecolor='k')
+# for (x,y), s in xy_s_dict.items():
+#     plt.text(hex_0_grid[y,x], hex_1_grid[y,x], str(s), color='dimgray', fontsize=6, ha='center', va='center')
+# plt.axis('off')
+# plt.axis('equal')
+
+# # setting
+# plt.axis('off')
+# plt.tight_layout()
 
 # %% [markdown]
 # ## PICKLE

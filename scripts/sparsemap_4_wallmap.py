@@ -41,7 +41,7 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 # ## BASH PARAMETERS
 
 # %%
-job_id = 17#int(sys.argv[1])
+job_id = 42 #int(sys.argv[1])
 
 # %%
 in_dir = project_dir / "results"
@@ -55,7 +55,7 @@ if not os.path.exists(out_dir):
 dat_traj_dict = pickle.load(open(in_dir / "dat_traj_dict", "rb"))
 
 # %% [markdown]
-# ## SPECIFY ONE JOB BATCH
+# ## SPECIFY JOB BATCHES
 # 1. Select a subset of `dat_traj_dict` with a `pi_level` as a batch of jobs to run on cluster
 # 2. the key for reading `dat_traj_dict` is `(type_id, id_1, id_2)` to output the value `(s_traj, a_traj, occ_map, s_top, xy_traj)`
 # 3. for loading a mouse trajectory, use:
@@ -66,10 +66,10 @@ dat_traj_dict = pickle.load(open(in_dir / "dat_traj_dict", "rb"))
 #     - `type_id = 0`
 #     - `id_1` = 0 or 1 or ... (seed)
 #     - `id_2` = -1 (-1 to specify n/a)
-# 5. load a job as a nested tuple `((type_id, id_1, id_2), pi_level)`
+# 5. load a job as a nested tuple `(type_id, id_1, id_2)`
 
 # %%
-# WALL-ONLY MAP BATCH: 6 traj x 2 mice + 5 random traj (17 jobs, 16K walltime)
+# PILOT BATCH: 6 traj x 2 mice + 5 random traj (17 jobs, 16K walltime)
 seed_list = np.arange(5)
 rotation_id_list = np.arange(6)
 
@@ -81,6 +81,31 @@ job_list_mouse_4 = [(1,4,rot_id) for rot_id in rotation_id_list]
 # pack
 job_batch = {i+1: job for i, job in enumerate(job_list_rand + job_list_mouse_3 + job_list_mouse_4)}
 len(job_batch)
+
+# %%
+# FULL BATCH
+seed_list = np.arange(n_seeds_traj)
+rotation_id_list = np.arange(6)
+
+# get job lists
+job_list_rand = [(0,seed,-1) for seed in seed_list]
+
+job_list_all_mice = []
+for mouse_id in mouse_ids:
+    job_list_mouse = [(1,mouse_id,rot_id) for rot_id in rotation_id_list]
+    job_list_all_mice.extend(job_list_mouse)
+
+# pack
+job_batch_full = {i+1: job for i, job in enumerate(job_list_rand + job_list_all_mice)}
+
+# print
+len(job_batch_full)
+
+# %% [markdown]
+# ## JOB BATCH TO RUN
+
+# %%
+job_batch = job_batch_full
 
 # %% [markdown]
 # ## LOCAL PARAMETERS
@@ -122,6 +147,9 @@ pq_mask_amb_dict = get_pq_mask_dict_for_ambiguous_edges(sh_dz_arr)
 pi_all = get_p_vonmises_for_enumPI()
 T = get_T_tensor(sas_dict, ringsize, n_tiles)
 T_dict = get_T_tensor_dict(T, ringsize)
+
+# %%
+n_edges_wall
 
 # %% [markdown]
 # ## LOAD JOB
@@ -181,7 +209,7 @@ if not dat_exists:
     pickle.dump(dat_map, open(dat_path, "wb"))
     
 else:
-    score_iter_full, score_map_iter_full, eid_removed = pickle.load(open(dat_path, "rb"))
+    score_list, score_map_list = pickle.load(open(dat_path, "rb"))
 
 # %% [markdown]
 # ## TEST

@@ -119,6 +119,8 @@ def load_one_traj_from_selected_sessions(
         & (df_equal.ye >= df_tile.y.min() - ypad)
         & (df_equal.ye <= df_tile.y.max() + ypad)
     ]
+    ### V2: remove jagged paths
+    dff_equal = dff_equal[~dff_equal.is_small]
 
     # get x, y trajectory
     xy_traj = dff_equal[["xe", "ye"]].values
@@ -166,6 +168,43 @@ def gen_s_traj_rotated(theta, xy_traj, xy_center, xy_pixel_all, tile_id_all):
     return s_traj_rotated, xy_traj_rotated
 
 
+# def get_patched_s_traj(
+#     s_traj_unpatched, ssa_dict, df_tile_mean, xy_pixel_all, tile_id_all
+# ):
+#     # load a range of data
+#     # dff = df_equal[
+#     #     df_equal.session.isin(session_selected) & (df_equal.realtime <= realtime_max)
+#     # ]
+#     # get s_traj as self-avoiding tile walk
+#     # s_traj = dff_equal.tile_id.values
+#     s_traj_r = np.array(
+#         [x for x, y in zip(s_traj_unpatched[:-1], s_traj_unpatched[1:]) if x != y],
+#         dtype=int,
+#     )
+
+#     # get a_traj as tile transitions
+#     a_traj_r = np.array(
+#         [ssa_dict.get((s, s1), -1) for s, s1 in zip(s_traj_r[:-1], s_traj_r[1:])]
+#     )
+#     n_skipped_transition = (a_traj_r == -1).sum()
+#     print(
+#         f"{n_skipped_transition}/{len(a_traj_r)} skipped transitions are found before patching"
+#     )
+#     if n_skipped_transition == 0:
+#         return s_traj_r, a_traj_r
+
+#     # patch skipped transitions
+#     s_traj_1, a_traj_1 = patch_skipped_transitions(
+#         s_traj_r, a_traj_r, df_tile_mean, xy_pixel_all, tile_id_all, ssa_dict
+#     )
+
+#     n_skipped_transition = (a_traj_1 == -1).sum()
+#     print(
+#         f"{n_skipped_transition}/{len(a_traj_1)} skipped transitions are found after patching"
+#     )
+#     return s_traj_1, a_traj_1
+
+
 def get_patched_s_traj(
     s_traj_unpatched, ssa_dict, df_tile_mean, xy_pixel_all, tile_id_all
 ):
@@ -191,12 +230,17 @@ def get_patched_s_traj(
     if n_skipped_transition == 0:
         return s_traj_r, a_traj_r
 
-    # patch skipped transitions
-    s_traj_1, a_traj_1 = patch_skipped_transitions(
-        s_traj_r, a_traj_r, df_tile_mean, xy_pixel_all, tile_id_all, ssa_dict
-    )
+    # patch until no skipped transitions found
+    s_traj_1, a_traj_1 = s_traj_r, a_traj_r
+    for iter in range(100):
+        s_traj_1, a_traj_1 = patch_skipped_transitions(
+            s_traj_1, a_traj_1, df_tile_mean, xy_pixel_all, tile_id_all, ssa_dict
+        )
+        n_skipped_transition = (a_traj_1 == -1).sum()
+        if n_skipped_transition == 0:
+            break
+        print(f"    iter {iter}, n_skipped_transition {n_skipped_transition}")
 
-    n_skipped_transition = (a_traj_1 == -1).sum()
     print(
         f"{n_skipped_transition}/{len(a_traj_1)} skipped transitions are found after patching"
     )
@@ -302,7 +346,8 @@ def get_s_traj_from_random_walk(s0, n_iter, sas_dict, seed=42):
         s0 = s_traj[-1]
         a0 = np.random.choice(range(ringsize))
         s1 = sas_dict.get((s0, a0), -1)
-        if (s1 == -1) | (s1 == s0):
+        # if (s1 == -1) | (s1 == s0):
+        if s1 == -1:
             continue
         s_traj.append(s1)
         a_traj.append(a0)

@@ -41,7 +41,7 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 # ## BASH PARAMETERS
 
 # %%
-out_dir = project_dir / "results" / 'dat_infomap'
+out_dir = project_dir / "results"
 
 if not os.path.exists(out_dir):
     os.makedirs(out_dir)
@@ -60,10 +60,21 @@ method = 'nearest_neighbor_limit' # 'score_map', 'nearest_neighbor_limit'
 dat_traj_dict = pickle.load(open(project_dir / "results" / "dat_traj_dict", "rb"))
 
 # %% [markdown]
-# ## SPECIFY JOB BATCHES
+# ## SPECIFY ONE JOB BATCH
+# 1. Select a subset of `dat_traj_dict` with a `pi_level` as a batch of jobs to run on cluster
+# 2. the key for reading `dat_traj_dict` is `(type_id, id_1, id_2)` to output the value `(s_traj, a_traj, occ_map, s_top, xy_traj)`
+# 3. for loading a mouse trajectory, use:
+#     - `type_id = 1`
+#     - `id_1` = 3 or 4 or ... (mouse_id)
+#     - `id_2` = 0 or 1 ... or 5 (rotation_id)
+# 4. for loading a random trajectory, use:
+#     - `type_id = 0`
+#     - `id_1` = 0 or 1 or ... (seed)
+#     - `id_2` = -1 (-1 to specify n/a)
+# 5. load a job as a nested tuple `((type_id, id_1, id_2), pi_level)`
 
 # %%
-# PILOT OPTIMAL MAP BATCH: 10 pi_level, 6 traj for one mouse x 2 + 5 random trajectories (170 jobs, 16K walltime)
+# FULL PILOT BATCH: 10 pi_level, 6 traj for one mouse x 2 + 5 random trajectories (170 jobs, 16K walltime)
 seed_list = np.arange(5)
 rotation_id_list = np.arange(6)
 pi_level_list = np.arange(0, 91, 10)
@@ -74,11 +85,11 @@ job_list_mouse_3 = [((1,3,rot_id), pi_lev) for pi_lev in pi_level_list for rot_i
 job_list_mouse_4 = [((1,4,rot_id), pi_lev) for pi_lev in pi_level_list for rot_id in rotation_id_list]
 
 # pack
-job_batch_optmap_pilot = {i+1: job for i, job in enumerate(job_list_rand + job_list_mouse_3 + job_list_mouse_4)}
-len(job_batch_optmap_pilot)
+job_batch_optmap = {i+1: job for i, job in enumerate(job_list_rand + job_list_mouse_3 + job_list_mouse_4)}
+len(job_batch_optmap)
 
 # %%
-# PILOT RANDOM MAP BATCH: 10 pi_level, 2 mice x 5 random maps + 5 random trajectories x 5 random maps (350 jobs)
+# RANDOM MAP BATCH: 10 pi_level, 2 mice x 5 random maps + 5 random trajectories x 5 random maps (350 jobs)
 traj_seed_list = np.arange(5)
 map_seed_list = np.arange(5)
 pi_level_list = np.arange(0, 91, 10)
@@ -89,53 +100,8 @@ job_list_mouse_3 = [((1,3,0), pi_lev, map_seed) for pi_lev in pi_level_list for 
 job_list_mouse_4 = [((1,4,0), pi_lev, map_seed) for pi_lev in pi_level_list for map_seed in map_seed_list]
 
 # pack
-job_batch_randmap_pilot = {i+1: job for i, job in enumerate(job_list_rand + job_list_mouse_3 + job_list_mouse_4)}
-len(job_batch_randmap_pilot)
-
-# %%
-# FULL OPTIMAL MAP BATCH
-seed_list = np.arange(n_seeds_traj)
-rotation_id_list = np.arange(6)
-pi_level_list = np.arange(0, 91, 10)
-
-# get job lists
-job_list_rand = [((0,seed,-1), pi_lev) for pi_lev in pi_level_list for seed in seed_list]
-
-job_list_all_mice = []
-for mouse_id in mouse_ids:
-    job_list_mouse = [((1,mouse_id,rot_id), pi_lev) for pi_lev in pi_level_list for rot_id in rotation_id_list]
-    job_list_all_mice.extend(job_list_mouse)
-
-# pack
-job_batch_optmap_full = {i+1: job for i, job in enumerate(job_list_rand + job_list_all_mice)}
-
-# print
-len(job_batch_optmap_full)
-
-# %%
-# FULL RANDOM MAP BATCH
-traj_seed_list = np.arange(n_seeds_traj)
-map_seed_list = np.arange(n_seeds_map)
-pi_level_list = np.arange(0, 91, 10)
-
-# get job lists
-job_list_rand = [((0,traj_seed,-1), pi_lev, map_seed) for pi_lev in pi_level_list for traj_seed in traj_seed_list for map_seed in map_seed_list]
-#
-job_list_all_mice = []
-for mouse_id in mouse_ids:
-    job_list_mouse = [((1,mouse_id,0), pi_lev, map_seed) for pi_lev in pi_level_list for map_seed in map_seed_list]
-    job_list_all_mice.extend(job_list_mouse)
-
-# pack
-job_batch_randmap_full = {i+1: job for i, job in enumerate(job_list_rand + job_list_all_mice)}
-len(job_batch_randmap_full)
-
-# %% [markdown]
-# ## JOB BATCH TO RUN
-
-# %%
-job_batch_optmap = job_batch_optmap_full
-job_batch_randmap = job_batch_randmap_full
+job_batch_randmap = {i+1: job for i, job in enumerate(job_list_rand + job_list_mouse_3 + job_list_mouse_4)}
+len(job_batch_randmap)
 
 # %% [markdown]
 # ## PREP
@@ -266,7 +232,7 @@ def run_mp(para):
 # ### optmap
 
 # %%
-# run (4m30s for 170jobs; 14m for 520 jobs)
+# run (4m30s for 170jobs)
 if method == 'score_map':
     if not os.path.exists(out_dir / 'dat_infomap_optmap'):
         param = [(job_id, 'optmap') for job_id in list(job_batch_optmap)]
@@ -283,7 +249,7 @@ if method == 'score_map':
 # ### randmap
 
 # %%
-# run (9m for 350jobs; 44m for 1700 jobs)
+# run (9m for 350jobs)
 if method == 'score_map':
     if not os.path.exists(out_dir / 'dat_infomap_randmap'):
         param = [(job_id, 'randmap') for job_id in list(job_batch_randmap)]

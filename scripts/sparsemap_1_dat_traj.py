@@ -71,14 +71,15 @@ hex_0_grid, hex_1_grid, s_z_dict, s_hex_dict, hex_a_dict, xy_s_dict, a_dict, sas
 
 # %%
 # param
-mouse_id_all = [3, 4]
+mouse_id_all = mouse_ids
 session_selected = [2]
 
-# mp
+# mp (1m)
 theta_list = np.arange(0,360, 60) / 180 * np.pi
 def run_mp(mouse_id):
     print(f'Processing mouse {mouse_id}')
     dat_traj_list = get_rotated_dat_traj_for_one_mouse(mouse_id, theta_list, session_selected, df_tile_mean, xy_pixel_all, tile_id_all, ssa_dict, n_tiles, in_dir, df_tile, d_tile)
+    # dat_traj = s_traj_patched, a_traj_ext, occ_map, s_top, xy_traj_rotated
     print('')
     return dat_traj_list
 
@@ -104,9 +105,10 @@ for mouse_id, dat_traj_list in zip(mouse_id_all, dat_traj_list_all):
 selected_mouse_id = mouse_id_all[0]
 init_s = dat_traj_dict[(1,selected_mouse_id,0)][0][0]
 L_traj = int(np.mean([len(x[0]) for x in dat_traj_dict.values()]))
+L_traj = 15107 # override
 
 # iter
-seed_list = np.arange(5)
+seed_list = np.arange(n_seeds_traj)
 dat_traj_list = []
 for seed in seed_list:
     s_traj_rand, a_traj_rand = get_s_traj_from_random_walk(init_s, L_traj, sas_dict, seed=seed)
@@ -125,10 +127,7 @@ for seed, dat_traj in zip(seed_list, dat_traj_list):
     dat_traj_dict.update(dat_traj_dict_1)
 
 # %%
-s_traj_rand, a_traj_rand = get_s_traj_from_random_walk(init_s, L_traj, sas_dict, seed=seed)
-
-# %%
-dat_traj_dict.keys()
+dat_traj_dict.keys(), len(dat_traj_dict)
 
 # %% [markdown]
 # ## PICKLE
@@ -140,13 +139,47 @@ pickle.dump(dat_traj_dict, open(out_dir / "dat_traj_dict", "wb"))
 # ## TEST
 
 # %% [markdown]
+# ### tmp
+
+# %%
+dat_traj_list_all_rand = list(dat_traj_dict.values())[-10:]
+cc = plt.hist(np.hstack([dat_traj_list_all_rand[x][-2] for x in range(10)]), range(155+1))
+plt.plot(np.sort(cc[0]))
+
+# %% [markdown]
+# ### tmp
+
+# %%
+mouse_id = 4
+
+# load
+tag = f"mouse_{mouse_id}"
+df_equal = pickle.load(open(in_dir / tag / "df_equal", "rb"))
+
+dff = df_equal[df_equal.session==2]
+len(dff[~dff.is_small]) / len(dff)
+
+xy_traj = dff[['xe','ye']].values
+xy_small = dff[dff.is_small][['xe','ye']].values
+
+# plot
+plt.figure(figsize=(8,8), dpi=200)
+# for rot_id in [0,1]:
+# s_traj, a_traj, occ_map, s_top, xy_traj = dat_traj_dict[(1,mouse_id,rot_id)]
+plt.plot(*xy_traj[100:-100].T, lw=.1, zorder=0)
+plt.scatter(*xy_small[:].T, s=.1, c='r', zorder=1)
+plt.axis('equal')
+
+# %% [markdown]
 # ### plot rotated trajectories
 
 # %%
+mouse_id = 19
+
 # plot
 plt.figure(figsize=(8,8), dpi=200)
 for rot_id in [0,1]:
-    s_traj, a_traj, occ_map, s_top, xy_traj = dat_traj_dict[(1,3,rot_id)]
+    s_traj, a_traj, occ_map, s_top, xy_traj = dat_traj_dict[(1,mouse_id,rot_id)]
     plt.plot(*xy_traj[:].T, lw=.1)
     plt.scatter(*xy_traj[:1].T, lw=1)
     plt.axis('equal')
@@ -206,7 +239,7 @@ plt.tight_layout()
 
 # %%
 # prep
-mouse_id, rot_id = 3, 0
+mouse_id, rot_id = 19, 0
 s_traj, a_traj, occ_map, s_top, xy_traj = dat_traj_dict[(1,mouse_id,rot_id)]
 s_count = [Counter(s_traj)[x] for x in range(n_tiles)]
 hex_0_all, hex_1_all = np.array(list(s_hex_dict.values())).T
@@ -217,6 +250,7 @@ plt.figure(figsize=(5,5.5), dpi=200)
 plt.title(f'mouse {mouse_id}, sessions: {2}; top half occupied: {len(s_top)} tiles')
 
 # map
+occ_map, s_top = get_occ_map_from_s_traj(s_traj[:], n_tiles) # override
 plt.scatter(hex_0_all, hex_1_all, c=occ_map, cmap='PuRd', marker='h', s=800, vmin=0, edgecolor='none')
 plt.scatter(hex_0_all[s_top], hex_1_all[s_top], c='none', marker='o', s=300, edgecolor='k')
 for (x,y), s in xy_s_dict.items():

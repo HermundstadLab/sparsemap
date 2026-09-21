@@ -79,7 +79,7 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 # ## BASH PARAMETERS
 
 # %%
-job_id = 72#int(sys.argv[1])
+job_id = 401#int(sys.argv[1])
 
 # %%
 in_dir = project_dir / "results"
@@ -93,7 +93,7 @@ if not os.path.exists(out_dir):
 dat_traj_dict = pickle.load(open(in_dir / "dat_traj_dict", "rb"))
 
 # %% [markdown]
-# ## SPECIFY ONE JOB BATCH
+# ## SPECIFY JOB BATCHES
 # 1. Select a subset of `dat_traj_dict` with a `pi_level` as a batch of jobs to run on cluster
 # 2. the key for reading `dat_traj_dict` is `(type_id, id_1, id_2)` to output the value `(s_traj, a_traj, occ_map, s_top, xy_traj)`
 # 3. for loading a mouse trajectory, use:
@@ -130,7 +130,7 @@ job_batch_test_pilot = {
 }
 
 # %%
-# FULL PILOT BATCH: 10 pi_level, 6 traj for one mouse x 2 + 5 random trajectories (170 jobs, 16K walltime)
+# PILOT BATCH: 10 pi_level, 6 traj for one mouse x 2 + 5 random trajectories (170 jobs, 16K walltime)
 seed_list = np.arange(5)
 rotation_id_list = np.arange(6)
 pi_level_list = np.arange(0, 91, 10)
@@ -143,12 +143,38 @@ job_list_mouse_4 = [((1,4,rot_id), pi_lev) for pi_lev in pi_level_list for rot_i
 # pack
 job_batch_pilot = {i+1: job for i, job in enumerate(job_list_rand + job_list_mouse_3 + job_list_mouse_4)}
 
-# %%
+# print
 job_batch = job_batch_pilot
 len(job_batch)
 
 # %%
-job_batch_pilot[72]
+# FULL BATCH
+seed_list = np.arange(n_seeds_traj)
+rotation_id_list = np.arange(6)
+pi_level_list = np.arange(0, 91, 10)
+
+# get job lists
+job_list_rand = [((0,seed,-1), pi_lev) for pi_lev in pi_level_list for seed in seed_list]
+
+job_list_all_mice = []
+for mouse_id in mouse_ids:
+    job_list_mouse = [((1,mouse_id,rot_id), pi_lev) for pi_lev in pi_level_list for rot_id in rotation_id_list]
+    job_list_all_mice.extend(job_list_mouse)
+
+# pack
+job_batch_full = {i+1: job for i, job in enumerate(job_list_rand + job_list_all_mice)}
+
+# print
+len(job_batch_full)
+
+# %%
+np.array([x for x,y in job_batch_full.items() if (y[0][0]==1) & (y[0][1]==19)])
+
+# %% [markdown]
+# ## JOB BATCH TO RUN
+
+# %%
+job_batch = job_batch_full
 
 # %% [markdown]
 # ## LOCAL PARAMETERS
@@ -183,6 +209,7 @@ T_dict = get_T_tensor_dict(T, ringsize)
 # check if the saved file exists
 dat_path = out_dir / f"dat_map_{job_batch[job_id]}"
 dat_exists = os.path.exists(dat_path)
+dat_exists
 
 # %%
 key, pi_level = job_batch[job_id]

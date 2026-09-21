@@ -2,6 +2,7 @@
 scripts/*.ipynb
 data
 results
+results_pilot
 tmp
 scripts_unsynced
 src_unsynced

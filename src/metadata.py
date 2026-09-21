@@ -1,7 +1,6 @@
 from pathlib import Path
 import numpy as np
 
-
 ## PYTHON EVIRONMENT
 """
 python 3.11.13
@@ -24,7 +23,11 @@ nbformat
 project_dir = Path(__file__).parent.parent
 
 ## BASH PARAMETERS
-mouse_ids = [3, 4]
+# mouse_ids = [3, 4, 5, 16, 18, 19, 20, 22, 23]
+mouse_ids = [3, 4, 5, 16, 18, 19, 20]
+n_mice = len(mouse_ids)
+n_seeds_traj = 10
+n_seeds_map = 10
 
 ## GLOBAL PARAMETERS
 # UTILS

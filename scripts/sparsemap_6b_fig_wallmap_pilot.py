@@ -38,37 +38,26 @@ from src.sparsemap import *
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 # %%
-# FULL BATCH
-seed_list = np.arange(n_seeds_traj)
+# WALL-ONLY MAP BATCH: 6 traj x 2 mice + 5 random traj (17 jobs, 16K walltime)
+seed_list = np.arange(5)
 rotation_id_list = np.arange(6)
 
 # get job lists
 job_list_rand = [(0,seed,-1) for seed in seed_list]
-
-job_list_all_mice = []
-for mouse_id in mouse_ids:
-    job_list_mouse = [(1,mouse_id,rot_id) for rot_id in rotation_id_list]
-    job_list_all_mice.extend(job_list_mouse)
+job_list_mouse_3 = [(1,3,rot_id) for rot_id in rotation_id_list]
+job_list_mouse_4 = [(1,4,rot_id) for rot_id in rotation_id_list]
 
 # pack
-job_batch_wallmap = {i+1: job for i, job in enumerate(job_list_rand + job_list_all_mice)}
-
-# print
+job_batch_wallmap = {i+1: job for i, job in enumerate(job_list_rand + job_list_mouse_3 + job_list_mouse_4)}
 len(job_batch_wallmap)
-
-# %%
-job_batch_wallmap
-
-# %%
-np.arange(n_seeds_traj+1, len(job_batch_wallmap)+1)
 
 # %%
 # load
 pi_level_list = np.arange(80, 91, 1)
 out_dir = project_dir / "results" / "data_wallmap"
-score_tensor_rw = np.array([pickle.load(open(out_dir / f"dat_map_{x}", "rb"))[0] for x in [job_batch_wallmap[x] for x in range(1,n_seeds_traj+1)]])
-score_tensor_unrot = np.array([pickle.load(open(out_dir / f"dat_map_{x}", "rb"))[0] for x in [job_batch_wallmap[x] for x in [11,17,23,29,35,41,47]]])
-score_tensor_rot = np.array([pickle.load(open(out_dir / f"dat_map_{x}", "rb"))[0] for x in [job_batch_wallmap[x] for x in [12, 13, 14, 15, 16, 18, 19, 20, 21, 22, 24, 25, 26, 27, 28, 30, 31, 32, 33, 34, 36, 37, 38, 39, 40, 42, 43, 44, 45, 46, 48, 49, 50, 51, 52]]])
+score_tensor_rw = np.array([pickle.load(open(out_dir / f"dat_map_{x}", "rb"))[0] for x in [job_batch_wallmap[x] for x in [1,2,3,4,5]]])
+score_tensor_rot = np.array([pickle.load(open(out_dir / f"dat_map_{x}", "rb"))[0] for x in [job_batch_wallmap[x] for x in [7,8,9,10,11,13,14,15,16,17]]])
+score_tensor_unrot = np.array([pickle.load(open(out_dir / f"dat_map_{x}", "rb"))[0] for x in [job_batch_wallmap[x] for x in [6,12]]])
 
 # prep
 score_tensor_list = [score_tensor_rw, score_tensor_rot, score_tensor_unrot]
