@@ -1,22 +1,6 @@
 from pathlib import Path
 import numpy as np
 
-## PYTHON EVIRONMENT
-"""
-python 3.11.13
-ipython
-opencv 4.10.0
-matplotlib
-pandas
-scipy 
-scikit-image
-scikit-learn
-multiprocess
-h5py
-sparse
-nbformat
-"""
-
 ## SET DIRECTORIES
 # bigdata_dir = Path("/media/mat/F8943ADD943A9DD6/")
 # bigdata_dir = Path("/mnt/HDD/")

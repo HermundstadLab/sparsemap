@@ -1,6 +1,8 @@
 *.egg-info
+*.pdf
 scripts/*.ipynb
-data
+data/mouse_22
+data/mouse_23
 results
 results_pilot
 tmp
