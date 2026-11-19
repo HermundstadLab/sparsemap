@@ -164,10 +164,37 @@ score_tensor = np.array([pickle.load(open(load_dir / f"dat_map_{job_batch_randma
 score_tensor_list.append(score_tensor)
 
 # %% [markdown]
-# ## FIGURE: performance curves
+# ### tmp dat_score
 
 # %%
-score_tensor.shape
+# prep
+score_tar = 0.7
+mapsize_tensor_list = [np.argmin(np.abs(x-score_tar), axis=-1) for x in score_tensor_list]
+
+# pickle
+dat_score = label_list, score_tensor_list, mapsize_tensor_list
+pickle.dump(dat_score, open("dat_score", "wb"))
+
+# %%
+label_list, score_tensor_list, mapsize_tensor_list = pickle.load(open("dat_score", "rb"))
+
+# %%
+label_list
+
+# %%
+print('score tensor shape')
+for i in range(5):
+    print(score_tensor_list[i].shape)
+    
+print('\nselected mapsize tensor shape')
+for i in range(5):
+    print(mapsize_tensor_list[i].shape)
+
+# %%
+mapsize_tensor_list[0].mean(1)
+
+# %% [markdown]
+# ## FIGURE: performance curves
 
 # %%
 # plot 10s
@@ -317,9 +344,9 @@ for i, (score_tensor, label, color) in enumerate(zip(score_tensor_select, label_
 plt.axhline(0, color='gray', linestyle='--', lw=1)
 # plt.xlabel('PI fidelity')
 # plt.ylabel('compression rate\n(% reduction in map size)')
-plt.gca().yaxis.set_major_formatter(mtick.PercentFormatter(xmax=1.0))
+# plt.gca().yaxis.set_major_formatter(mtick.PercentFormatter(xmax=1.0))
 plt.xlim([15, 95])
-plt.ylim([-.05, .20])
+plt.ylim([-.05, .2])
 plt.grid(alpha=.2)
 
 # global setting

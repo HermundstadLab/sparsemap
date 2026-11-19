@@ -323,6 +323,56 @@ plt.tight_layout()
 plt.savefig(f"sparsemap_infomap.pdf", dpi=300)
 
 # %% [markdown]
+# ### plot: info-density, mouse vs randmap
+
+# %%
+# prep
+mapsize = 68
+method_list = ['optmap']*len(mouse_ids) + ['randmap']*len(mouse_ids)
+job_list = [((1, x, 0), 70) for x in mouse_ids] + [((1, x, 0), 70, 0) for x in mouse_ids]
+
+# iter
+info_mean_list_optmap = []
+info_mean_list_randmap = []
+for method, job in zip(method_list, job_list):
+    # load
+    if method == 'optmap':
+        mapsize_iter, infomap_all, info_mean_all = dat_infomap_optmap
+        load_dir = project_dir / "results" / "data_optmap"
+        # job = job_batch_optmap[job_id]
+        job_id = job_batch_optmap_r[job]
+    elif method == 'randmap':
+        mapsize_iter, infomap_all, info_mean_all = dat_infomap_randmap
+        load_dir = project_dir / "results" / "data_randmap"
+        # job = job_batch_randmap[job_id]
+        job_id = job_batch_randmap_r[job]
+    
+    # get map
+    s_traj, a_traj, occ_map, s_top, xy_traj = dat_traj_dict[job[0]]
+    map_iter, mapsize_iter, score_map_iter, score_iter = load_maps_from_one_job(load_dir, job, n_edges)
+    map, score_map, score, n_edges_map = load_one_map(mapsize, map_iter, mapsize_iter, score_iter, score_map_iter, e_sh_arr, sh_dz_arr)
+    score_list.append(score)
+    n_edges_map_list.append(n_edges_map)
+
+    # get infomap
+    # infomap = infomap_all[job_id-1, mapsize_iter.index(mapsize)]
+    info_mean = info_mean_all[job_id-1, mapsize_iter.index(mapsize)]
+    infomap_list.append(infomap)
+    info_mean_list.append(info_mean)
+    
+    # append
+    if method == 'optmap':
+        info_mean_list_optmap.append(info_mean)
+    elif method == 'randmap':
+        info_mean_list_randmap.append(info_mean)
+
+# %%
+info_mean_list_optmap
+
+# %%
+info_mean_list_randmap
+
+# %% [markdown]
 # ## FIGURE: stat
 
 # %% [markdown]
